@@ -102,22 +102,28 @@ body {
   flex-direction: column;
   gap: 1.5rem;
   position: relative;
-  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease, opacity 1s ease-in-out;
+  transition: box-shadow 0.3s ease, opacity 1s ease-in-out;
 }
 
 .panel:hover {
   box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5), 0 0 20px var(--glass-border);
 }
 
-.panel:not(.closed):hover {
+.panel-wrapper {
+  position: relative;
+  display: flex;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.panel-wrapper:not(.closed):hover {
   transform: translateY(-2px);
 }
 
-.panel-left.closed {
+.panel-wrapper-left.closed {
   transform: translateX(calc(-100% - 2rem));
 }
 
-.panel-right.closed {
+.panel-wrapper-right.closed {
   transform: translateX(calc(100% + 2rem));
 }
 

@@ -257,11 +257,9 @@ function App() {
       
       <div className="ui-layer">
         {/* Left Panel: AI Assistant Chat */}
-        <div className={`panel panel-left ${isLeftOpen ? '' : 'closed'}`}>
-          <div className="toggle-btn toggle-left" onClick={() => setIsLeftOpen(!isLeftOpen)}>
-            {isLeftOpen ? '◀' : '▶'}
-          </div>
-          <h2>AI Core Assistant</h2>
+        <div className={`panel-wrapper panel-wrapper-left ${isLeftOpen ? '' : 'closed'}`}>
+          <div className="panel panel-left">
+            <h2>AI Core Assistant</h2>
           
           <input 
             type="password" 
@@ -301,14 +299,20 @@ function App() {
             onKeyDown={handleChatSubmit}
             disabled={isTyping}
           />
+          </form>
+          </div>
+          <div className="toggle-btn toggle-left" onClick={() => setIsLeftOpen(!isLeftOpen)}>
+            {isLeftOpen ? '◀' : '▶'}
+          </div>
         </div>
 
         {/* Right Panel: Pomodoro & Tasks */}
-        <div className={`panel panel-right ${isRightOpen ? '' : 'closed'}`}>
+        <div className={`panel-wrapper panel-wrapper-right ${isRightOpen ? '' : 'closed'}`}>
           <div className="toggle-btn toggle-right" onClick={() => setIsRightOpen(!isRightOpen)}>
             {isRightOpen ? '▶' : '◀'}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="panel panel-right">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2>{mode} Time</h2>
             <div style={{ display: 'flex', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: '6px' }}>
