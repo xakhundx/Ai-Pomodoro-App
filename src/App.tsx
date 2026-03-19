@@ -6,7 +6,48 @@ import './index.css';
 const WORK_TIME = 25 * 60;
 const BREAK_TIME = 5 * 60;
 
+const playCompletionChime = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    
+    const playTone = (freq: number, timeOffset: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      
+      const startTime = ctx.currentTime + timeOffset;
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.3, startTime + duration * 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+
+    playTone(523.25, 0, 0.5); // C5
+    playTone(659.25, 0.1, 0.5); // E5
+    playTone(783.99, 0.2, 1.0); // G5
+  } catch (e) {
+    console.error("Audio playback failed", e);
+  }
+};
+
 function App() {
+  // API Key State
+  const [userApiKey, setUserApiKey] = useState(() => {
+    return localStorage.getItem('pomodoro-api-key') || '';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pomodoro-api-key', userApiKey);
+  }, [userApiKey]);
+
   // Task State
   const [tasks, setTasks] = useState<Task[]>(() => {
     const saved = localStorage.getItem('pomodoro-tasks');
@@ -34,7 +75,8 @@ function App() {
     let interval: number | undefined;
     if (isRunning && timeLeft > 0) {
       interval = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
-    } else if (timeLeft === 0) {
+    } else if (timeLeft === 0 && isRunning) {
+      playCompletionChime();
       setIsRunning(false);
       handleAIInteraction(`The ${mode} session has elapsed. What should I prioritize next?`);
       if (mode === 'Work') {
@@ -79,7 +121,7 @@ function App() {
     setChatMessage("Processing..."); // typing indicator
     
     // Call Gemini Service
-    const response = await askGemini(prompt, tasks, { mode, timeLeft });
+    const response = await askGemini(userApiKey, prompt, tasks, { mode, timeLeft });
     setChatMessage(response);
     setIsTyping(false);
   };
@@ -100,13 +142,29 @@ function App() {
   return (
     <div className="app-container">
       <div className="canvas-container">
-        <AvatarCanvas />
+        <AvatarCanvas mode={mode} isRunning={isRunning} />
       </div>
       
       <div className="ui-layer">
         {/* Left Panel: AI Assistant Chat */}
         <div className="panel panel-left">
           <h2>AI Core Assistant</h2>
+          
+          <input 
+            type="password" 
+            className="input-field" 
+            placeholder="Enter Gemini API Key to activate..." 
+            value={userApiKey}
+            onChange={(e) => setUserApiKey(e.target.value)}
+            style={{ padding: '0.6rem', fontSize: '0.8rem', border: userApiKey ? '1px solid var(--glass-border)' : '1px solid #ef4444' }}
+          />
+
+          {!userApiKey && (
+            <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '10px', borderRadius: '8px', color: '#fca5a5', fontSize: '0.75rem', lineHeight: '1.4' }}>
+              <strong>Offline Mode Active:</strong> Provide a Gemini API key (free tier is fine) to unlock dynamic AI insights. Until then, basic offline logic is loaded.
+            </div>
+          )}
+
           <div className="chat-box" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
             <div style={{ 
               background: 'linear-gradient(135deg, var(--primary), var(--secondary))', 

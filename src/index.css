@@ -17,10 +17,18 @@ body {
   margin: 0;
   padding: 0;
   font-family: 'Inter', sans-serif;
-  background: var(--bg-gradient);
+  background: linear-gradient(-45deg, #0f172a, #1e293b, #0e1b38, #0b1525);
+  background-size: 400% 400%;
+  animation: bgShift 15s ease infinite;
   color: var(--text-main);
   min-height: 100vh;
   overflow: hidden;
+}
+
+@keyframes bgShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .app-container {
