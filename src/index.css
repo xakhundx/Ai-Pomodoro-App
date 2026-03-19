@@ -2,30 +2,31 @@
 
 :root {
   --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  --glass-bg: rgba(15, 23, 42, 0.5);
-  --glass-border: rgba(192, 132, 252, 0.25);
-  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
-  --primary: #c084fc; /* Ultra Ego Purple */
-  --primary-glow: rgba(192, 132, 252, 0.4);
-  --secondary: #e2e8f0; /* Ultra Instinct Silver */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  --primary: #a855f7; /* Vibrant UI Purple */
+  --primary-glow: rgba(168, 85, 247, 0.6);
+  --secondary: #3b82f6; /* Vibrant UI Blue */
   --accent: #38bdf8;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
+  --text-main: #ffffff;
+  --text-muted: #cbd5e1;
 }
 
 body {
   margin: 0;
   padding: 0;
-  font-family: 'Inter', sans-serif;
-  background: linear-gradient(-45deg, #0f172a, #1e293b, #0e1b38, #0b1525);
+  background: linear-gradient(-45deg, #020617, #0f172a, #172554, #0c4a6e);
   background-size: 400% 400%;
-  animation: bgShift 15s ease infinite;
+  animation: gradientFlow 15s ease infinite;
   color: var(--text-main);
-  min-height: 100vh;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+  font-weight: 500;
+  letter-spacing: 0.3px;
   overflow: hidden;
 }
 
-@keyframes bgShift {
+@keyframes gradientFlow {
   0% { background-position: 0% 50%; }
   50% { background-position: 100% 50%; }
   100% { background-position: 0% 50%; }
@@ -271,8 +272,8 @@ h1, h2, h3 {
 }
 
 .task-item {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1rem;
   border-radius: 12px;
   display: flex;
@@ -283,9 +284,10 @@ h1, h2, h3 {
 }
 
 .task-item:hover {
-  background: rgba(255,255,255,0.05);
-  border-color: var(--glass-border);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.25);
   transform: translateX(4px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
 }
 
 .task-checkbox {
