@@ -279,7 +279,7 @@ function App() {
           <div className="chat-box" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
             <div style={{ 
               background: 'linear-gradient(135deg, var(--primary), var(--secondary))', 
-              padding: '12px 16px', 
+              padding: '16px 24px', 
               borderRadius: '16px 16px 16px 4px', 
               width: 'fit-content',
               maxWidth: '90%',
