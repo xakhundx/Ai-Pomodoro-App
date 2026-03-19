@@ -92,6 +92,10 @@ function App() {
     recognition.start();
   };
 
+  // Panel Collapse States
+  const [isLeftOpen, setIsLeftOpen] = useState(true);
+  const [isRightOpen, setIsRightOpen] = useState(true);
+
   // Save to localStorage
   useEffect(() => {
     localStorage.setItem('pomodoro-tasks', JSON.stringify(tasks));
@@ -184,7 +188,10 @@ function App() {
       
       <div className="ui-layer">
         {/* Left Panel: AI Assistant Chat */}
-        <div className="panel panel-left">
+        <div className={`panel panel-left ${isLeftOpen ? '' : 'closed'}`}>
+          <div className="toggle-btn toggle-left" onClick={() => setIsLeftOpen(!isLeftOpen)}>
+            {isLeftOpen ? '◀' : '▶'}
+          </div>
           <h2>AI Core Assistant</h2>
           
           <input 
@@ -228,7 +235,10 @@ function App() {
         </div>
 
         {/* Right Panel: Pomodoro & Tasks */}
-        <div className="panel panel-right">
+        <div className={`panel panel-right ${isRightOpen ? '' : 'closed'}`}>
+          <div className="toggle-btn toggle-right" onClick={() => setIsRightOpen(!isRightOpen)}>
+            {isRightOpen ? '▶' : '◀'}
+          </div>
           <h2>{mode} Time</h2>
           <div style={{ fontSize: '5rem', fontWeight: 800, textAlign: 'center', margin: '0', fontFamily: 'monospace', textShadow: '0 0 30px var(--primary-glow)', color: 'white', letterSpacing: '-2px' }}>
             {mins}:{secs}
