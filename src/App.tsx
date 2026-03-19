@@ -291,7 +291,7 @@ function App() {
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{completedCount}/{tasks.length} done</span>
           </div>
           
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', flex: 1, minHeight: '150px' }}>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: '150px' }}>
             {tasks.map(task => (
               <li key={task.id} className="task-item" style={{ opacity: task.completed ? 0.6 : 1 }}>
                 <input 
@@ -306,11 +306,13 @@ function App() {
                   onChange={(e) => updateTaskText(task.id, e.target.value)}
                   style={{ 
                     flex: 1, 
+                    minWidth: 0,
                     background: 'transparent', 
                     border: 'none', 
                     outline: 'none', 
                     color: 'white', 
                     textDecoration: task.completed ? 'line-through' : 'none',
+                    textOverflow: 'ellipsis',
                     fontSize: '0.95rem',
                     fontFamily: 'inherit',
                     padding: 0
