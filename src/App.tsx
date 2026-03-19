@@ -3,9 +3,6 @@ import AvatarCanvas from './components/AvatarCanvas';
 import { askGemini, Task } from './services/gemini';
 import './index.css';
 
-const WORK_TIME = 25 * 60;
-const BREAK_TIME = 5 * 60;
-
 const playCompletionChime = () => {
   try {
     const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
@@ -102,9 +99,28 @@ function App() {
   }, [tasks]);
 
   // Timer State
-  const [timeLeft, setTimeLeft] = useState(WORK_TIME);
+  const [workDuration, setWorkDuration] = useState(() => parseInt(localStorage.getItem('pomodoro-work-time') || '25'));
+  const [breakDuration, setBreakDuration] = useState(() => parseInt(localStorage.getItem('pomodoro-break-time') || '5'));
+  const [timeLeft, setTimeLeft] = useState(workDuration * 60);
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState<'Work' | 'Break'>('Work');
+
+  useEffect(() => {
+    localStorage.setItem('pomodoro-work-time', workDuration.toString());
+    localStorage.setItem('pomodoro-break-time', breakDuration.toString());
+  }, [workDuration, breakDuration]);
+
+  const handleWorkChange = (val: number) => {
+    if (val < 1) val = 1;
+    setWorkDuration(val);
+    if (!isRunning && mode === 'Work') setTimeLeft(val * 60);
+  };
+
+  const handleBreakChange = (val: number) => {
+    if (val < 1) val = 1;
+    setBreakDuration(val);
+    if (!isRunning && mode === 'Break') setTimeLeft(val * 60);
+  };
 
   // Chat State
   const [chatMessage, setChatMessage] = useState("System initialized. I am your productivity assistant. Ready to manage your tasks?");
@@ -122,20 +138,20 @@ function App() {
       handleAIInteraction(`The ${mode} session has elapsed. What should I prioritize next?`);
       if (mode === 'Work') {
         setMode('Break');
-        setTimeLeft(BREAK_TIME);
+        setTimeLeft(breakDuration * 60);
       } else {
         setMode('Work');
-        setTimeLeft(WORK_TIME);
+        setTimeLeft(workDuration * 60);
       }
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, mode]);
+  }, [isRunning, timeLeft, mode, workDuration, breakDuration]);
 
   const toggleTimer = () => setIsRunning(!isRunning);
   const switchMode = (newMode: 'Work' | 'Break') => {
     setIsRunning(false);
     setMode(newMode);
-    setTimeLeft(newMode === 'Work' ? WORK_TIME : BREAK_TIME);
+    setTimeLeft(newMode === 'Work' ? workDuration * 60 : breakDuration * 60);
   };
 
   // Task Handlers
@@ -239,7 +255,19 @@ function App() {
           <div className="toggle-btn toggle-right" onClick={() => setIsRightOpen(!isRightOpen)}>
             {isRightOpen ? '▶' : '◀'}
           </div>
-          <h2>{mode} Time</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2>{mode} Time</h2>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: '6px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Work</span>
+                <input type="number" min="1" value={workDuration} onChange={(e) => handleWorkChange(parseInt(e.target.value) || 1)} style={{ width: '40px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'white', textAlign: 'center', fontSize: '0.85rem' }} disabled={isRunning} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '4px 8px', borderRadius: '6px' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Break</span>
+                <input type="number" min="1" value={breakDuration} onChange={(e) => handleBreakChange(parseInt(e.target.value) || 1)} style={{ width: '40px', background: 'transparent', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'white', textAlign: 'center', fontSize: '0.85rem' }} disabled={isRunning} />
+              </div>
+            </div>
+          </div>
           <div style={{ fontSize: '5rem', fontWeight: 800, textAlign: 'center', margin: '0', fontFamily: 'monospace', textShadow: '0 0 30px var(--primary-glow)', color: 'white', letterSpacing: '-2px' }}>
             {mins}:{secs}
           </div>
