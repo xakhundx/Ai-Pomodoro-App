@@ -36,15 +36,6 @@ const playCompletionChime = () => {
 };
 
 function App() {
-  // API Key State
-  const [userApiKey, setUserApiKey] = useState(() => {
-    return localStorage.getItem('pomodoro-api-key') || '';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('pomodoro-api-key', userApiKey);
-  }, [userApiKey]);
-
   // Task State
   const [tasks, setTasks] = useState<Task[]>(() => {
     const saved = localStorage.getItem('pomodoro-tasks');
@@ -296,7 +287,7 @@ function App() {
       '[You are Goku! You are extremely high-energy, super encouraging, and always celebrate hard work loudly!] ';
 
     // Call Gemini Service
-    const response = await askGemini(userApiKey, personaContext + prompt, tasks, { mode, timeLeft });
+    const response = await askGemini(personaContext + prompt, tasks, { mode, timeLeft });
     setChatMessage(response);
     setIsTyping(false);
   };
@@ -373,21 +364,6 @@ function App() {
             </select>
           </div>
           
-          <input 
-            type="password" 
-            className="input-field" 
-            placeholder="Enter Gemini API Key to activate..." 
-            value={userApiKey}
-            onChange={(e) => setUserApiKey(e.target.value)}
-            style={{ padding: '0.6rem', fontSize: '0.8rem', border: userApiKey ? '1px solid var(--glass-border)' : '1px solid #ef4444' }}
-          />
-
-          {!userApiKey && (
-            <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '10px', borderRadius: '8px', color: '#fca5a5', fontSize: '0.75rem', lineHeight: '1.4' }}>
-              <strong>Offline Mode Active:</strong> Provide a Gemini API key (free tier is fine) to unlock dynamic AI insights. Until then, basic offline logic is loaded.
-            </div>
-          )}
-
           <div className="chat-box" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
             <div style={{ 
               background: 'linear-gradient(135deg, var(--primary), var(--secondary))', 

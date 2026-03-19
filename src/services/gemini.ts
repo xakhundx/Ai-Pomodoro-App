@@ -7,7 +7,6 @@ export interface Task {
 }
 
 export async function askGemini(
-  apiKey: string,
   prompt: string, 
   tasks: Task[], 
   timerState: { mode: string, timeLeft: number }
@@ -30,7 +29,7 @@ export async function askGemini(
     }
   };
 
-  if (!apiKey.trim()) {
+  if (tasks.length === 0 && prompt === "") {
     return generateOfflineResponse();
   }
 
@@ -42,7 +41,7 @@ Suggest logically which task they should tackle first based on standard prioriti
 Keep your responses professional, concise (1-3 sentences maximum), smart, and motivating.`;
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    const response = await fetch(`/api/gemini`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
