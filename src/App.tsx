@@ -140,7 +140,7 @@ function App() {
   const completedCount = tasks.filter(t => t.completed).length;
 
   return (
-    <div className="app-container">
+    <div className={`app-container ${isRunning && mode === 'Work' ? 'focus-mode' : ''}`}>
       <div className="canvas-container">
         <AvatarCanvas mode={mode} isRunning={isRunning} />
       </div>

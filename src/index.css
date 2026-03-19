@@ -38,6 +38,34 @@ body {
   position: relative;
 }
 
+/* Focus Mode Darkening Overlay */
+.app-container::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.75);
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 1.5s ease-in-out;
+}
+
+.app-container.focus-mode::before {
+  opacity: 1;
+}
+
+/* Dim the AI Core chat panel when locked in */
+.app-container.focus-mode .panel-left {
+  opacity: 0.3;
+}
+
+.app-container.focus-mode .panel-left:hover {
+  opacity: 1;
+}
+
 /* 3D Canvas Container */
 .canvas-container {
   flex: 1;
@@ -73,7 +101,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, opacity 1s ease-in-out;
 }
 
 .panel:hover {
