@@ -4,12 +4,6 @@ import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text, useText
 import * as THREE from 'three';
 import gokuImage from '../assets/goku_vegeta.png';
 
-function CustomEnv() {
-  const texture = useTexture(gokuImage);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-  return <Environment map={texture} />;
-}
-
 function TouchParticles({ trigger }: { trigger: number }) {
   const pointsRef = useRef<THREE.Points>(null);
   const [particles, setParticles] = useState<Float32Array | null>(null);
@@ -59,24 +53,33 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
   const [hovered, setHover] = useState(false);
   const [clickTrigger, setClickTrigger] = useState(0);
 
+  const texture = useTexture(gokuImage);
+  
+  useEffect(() => {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(-2, 1);
+    texture.offset.set(1.5, 0);
+    texture.needsUpdate = true;
+  }, [texture]);
+
   useFrame((state) => {
     if (coreRef.current) {
       if (isRunning && mode === 'Work') {
-        coreRef.current.rotation.y += 0.01;
-        coreRef.current.rotation.x += 0.005;
         const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 2) * 0.05;
         coreRef.current.scale.set(scale, scale, scale);
       } else if (isRunning && mode === 'Break') {
-        coreRef.current.rotation.y += 0.002;
         const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
         coreRef.current.scale.set(scale, scale, scale);
       } else {
-        coreRef.current.rotation.y = state.clock.elapsedTime * 0.2;
-        coreRef.current.rotation.x = state.clock.elapsedTime * 0.1;
         const targetScale = hovered ? 0.8 : 1;
         coreRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
       }
       
+      // Gentle sway instead of full rotation so the image remains uncropped and front-facing
+      coreRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.15;
+      coreRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.3) * 0.05;
       coreRef.current.position.y = Math.sin(state.clock.elapsedTime) * 0.1;
     }
   });
@@ -91,14 +94,15 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
         onPointerDown={() => setClickTrigger(prev => prev + 1)}
       >
         <MeshDistortMaterial 
-          color={hovered ? "#ffffff" : "#00bfff"} 
+          map={texture}
+          color={hovered ? "#ffffff" : "#f0f0f0"} 
           attach="material" 
-          distort={isRunning && mode === 'Work' ? 0.65 : 0.4} 
+          distort={isRunning && mode === 'Work' ? 0.35 : 0.15} 
           speed={isRunning && mode === 'Work' ? 5 : (isRunning && mode === 'Break' ? 1 : 2.5)} 
-          roughness={0.05} 
-          metalness={0.95}
-          emissive={hovered ? "#00ffff" : "#0047ab"}
-          emissiveIntensity={hovered ? 1.2 : 0.8}
+          roughness={0.15} 
+          metalness={0.8}
+          emissive="#222222"
+          emissiveIntensity={hovered ? 0.5 : 0.2}
         />
       </Sphere>
       <TouchParticles trigger={clickTrigger} />
@@ -116,7 +120,7 @@ export default function AvatarCanvas({ mode = 'Work', isRunning = false }: { mod
         
         <Suspense fallback={<Text position={[0, 0, 0]} fontSize={0.2} color="white">Waking AI...</Text>}>
           <AICore mode={mode} isRunning={isRunning} />
-          <CustomEnv />
+          <Environment preset="city" />
           <ContactShadows position={[0, -1.5, 0]} opacity={0.6} scale={10} blur={2.5} far={4} color="#0ea5e9" />
         </Suspense>
       </Canvas>
