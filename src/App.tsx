@@ -168,6 +168,10 @@ function App() {
     }
   };
 
+  const updateTaskText = (id: string, newText: string) => {
+    setTasks(tasks.map(t => t.id === id ? { ...t, text: newText } : t));
+  };
+
   const deleteTask = (id: string) => {
     setTasks(tasks.filter(t => t.id !== id));
   };
@@ -296,9 +300,23 @@ function App() {
                   checked={task.completed}
                   onChange={() => toggleTask(task.id, task.text, task.completed)}
                 /> 
-                <span style={{ flex: 1, color: 'white', textDecoration: task.completed ? 'line-through' : 'none' }}>
-                  {task.text}
-                </span>
+                <input 
+                  type="text"
+                  value={task.text}
+                  onChange={(e) => updateTaskText(task.id, e.target.value)}
+                  style={{ 
+                    flex: 1, 
+                    background: 'transparent', 
+                    border: 'none', 
+                    outline: 'none', 
+                    color: 'white', 
+                    textDecoration: task.completed ? 'line-through' : 'none',
+                    fontSize: '0.95rem',
+                    fontFamily: 'inherit',
+                    padding: 0
+                  }}
+                  disabled={task.completed}
+                />
                 <button 
                   className="outline" 
                   style={{ padding: '4px 8px', fontSize: '0.8rem', background: 'rgba(255,0,0,0.1)', border: 'none', color: '#ff4b4b' }}
