@@ -50,6 +50,7 @@ function TouchParticles({ trigger }: { trigger: number }) {
 
 function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
   const coreRef = useRef<THREE.Mesh>(null);
+  const baseScaleRef = useRef(1);
   const [hovered, setHover] = useState(false);
   const [clickTrigger, setClickTrigger] = useState(0);
 
@@ -66,15 +67,16 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
 
   useFrame((state) => {
     if (coreRef.current) {
+      baseScaleRef.current = THREE.MathUtils.lerp(baseScaleRef.current, hovered ? 0.75 : 1, 0.1);
+
       if (isRunning && mode === 'Work') {
-        const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 2) * 0.05;
+        const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 2) * 0.05;
         coreRef.current.scale.set(scale, scale, scale);
       } else if (isRunning && mode === 'Break') {
-        const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
+        const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
         coreRef.current.scale.set(scale, scale, scale);
       } else {
-        const targetScale = hovered ? 0.8 : 1;
-        coreRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
+        coreRef.current.scale.set(baseScaleRef.current, baseScaleRef.current, baseScaleRef.current);
       }
       
       // Spinning top rotation: sweeps back and forth perfectly across the image to show both characters
