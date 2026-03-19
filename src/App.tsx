@@ -299,7 +299,6 @@ function App() {
             onKeyDown={handleChatSubmit}
             disabled={isTyping}
           />
-          </form>
           </div>
           <div className="toggle-btn toggle-left" onClick={() => setIsLeftOpen(!isLeftOpen)}>
             {isLeftOpen ? '◀' : '▶'}
