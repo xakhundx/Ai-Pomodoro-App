@@ -43,14 +43,14 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
       scale={hovered ? 1.05 : 1}
     >
       <MeshDistortMaterial 
-        color={hovered ? "#38bdf8" : "#0ea5e9"} 
+        color={hovered ? "#ffffff" : "#00bfff"} 
         attach="material" 
-        distort={0.4} 
-        speed={2} 
-        roughness={0.2} 
-        metalness={0.8}
-        emissive={hovered ? "#38bdf8" : "#0f172a"}
-        emissiveIntensity={0.5}
+        distort={isRunning && mode === 'Work' ? 0.65 : 0.4} 
+        speed={isRunning && mode === 'Work' ? 5 : (isRunning && mode === 'Break' ? 1 : 2.5)} 
+        roughness={0.05} 
+        metalness={0.95}
+        emissive={hovered ? "#00ffff" : "#0047ab"}
+        emissiveIntensity={hovered ? 1.2 : 0.8}
       />
     </Sphere>
   );
