@@ -57,11 +57,26 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
   
   useEffect(() => {
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.repeat.set(-2, 1);
-    texture.offset.set(1.5, 0);
+    texture.repeat.set(1, 1);
+    texture.offset.set(0, 0);
     texture.needsUpdate = true;
+
+    // Apply true proportional planar UV mapping to fix distortion and vertical stretching permanently
+    if (coreRef.current) {
+      const geometry = coreRef.current.geometry;
+      const uvs = geometry.attributes.uv;
+      const positions = geometry.attributes.position;
+      const aspect = 16 / 9;
+      
+      for (let i = 0; i < uvs.count; i++) {
+        let x = positions.getX(i);
+        let y = positions.getY(i);
+        uvs.setXY(i, (x * 0.5) / aspect + 0.5, y * 0.5 + 0.5);
+      }
+      uvs.needsUpdate = true;
+    }
   }, [texture]);
 
   useFrame((state) => {
