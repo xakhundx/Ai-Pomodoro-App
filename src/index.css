@@ -162,7 +162,7 @@ body {
 .panel-left {
   width: 320px;
   resize: horizontal;
-  overflow: auto;
+  overflow: hidden;
   min-width: 250px;
   max-width: 50vw;
 }
@@ -171,7 +171,7 @@ body {
   width: 380px;
   resize: horizontal;
   direction: rtl; 
-  overflow: auto;
+  overflow: hidden;
   min-width: 300px;
   max-width: 50vw;
 }

@@ -200,6 +200,18 @@ function App() {
 
   const handleDragStart = (index: number) => setDraggedTaskIndex(index);
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+  const handleDragOverContainer = (e: React.DragEvent<HTMLUListElement>) => {
+    e.preventDefault();
+    const container = e.currentTarget;
+    const rect = container.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    if (y < 40) {
+      container.scrollTop -= 10;
+    } else if (y > rect.height - 40) {
+      container.scrollTop += 10;
+    }
+  };
+
   const handleDrop = (index: number) => {
     if (draggedTaskIndex === null || draggedTaskIndex === index) return;
     const newTasks = [...tasks];
@@ -342,7 +354,10 @@ function App() {
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{completedCount}/{tasks.length} done</span>
           </div>
           
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: '150px' }}>
+          <ul 
+            onDragOver={handleDragOverContainer}
+            style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: '150px' }}
+          >
             {tasks.map((task, index) => (
               <li 
                 key={task.id} 

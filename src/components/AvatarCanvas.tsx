@@ -11,23 +11,26 @@ function TouchParticles({ trigger }: { trigger: number }) {
   useEffect(() => {
     if (trigger > 0) {
       const newParticles = new Float32Array(150 * 3);
-      const newOpacities = [];
       for(let i=0; i<150 * 3; i++) {
-        newParticles[i] = (Math.random() - 0.5) * 5; 
+        // Start tightly clustered near center
+        newParticles[i] = (Math.random() - 0.5) * 0.5; 
       }
-      for(let i=0; i<150; i++) newOpacities.push(1);
       setParticles(newParticles);
-      opacities.current = newOpacities;
+      if (pointsRef.current) {
+        (pointsRef.current.material as THREE.PointsMaterial).opacity = 1;
+        pointsRef.current.geometry.setAttribute('position', new THREE.BufferAttribute(newParticles, 3));
+        pointsRef.current.geometry.attributes.position.needsUpdate = true;
+      }
     }
   }, [trigger]);
 
   useFrame(() => {
-    if (pointsRef.current && particles && opacities.current.length) {
+    if (pointsRef.current && particles) {
       const positions = pointsRef.current.geometry.attributes.position.array as Float32Array;
       for(let i=0; i<positions.length; i++) {
-        positions[i] *= 1.05; 
+        positions[i] *= 1.1; // Explode outward aggressively
       }
-      (pointsRef.current.material as THREE.PointsMaterial).opacity *= 0.9;
+      (pointsRef.current.material as THREE.PointsMaterial).opacity *= 0.92;
       pointsRef.current.geometry.attributes.position.needsUpdate = true;
     }
   });
