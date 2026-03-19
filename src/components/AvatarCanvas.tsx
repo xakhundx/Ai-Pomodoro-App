@@ -1,7 +1,14 @@
 import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text } from '@react-three/drei';
+import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text, useTexture } from '@react-three/drei';
 import * as THREE from 'three';
+import gokuImage from '../assets/goku_vegeta.png';
+
+function CustomEnv() {
+  const texture = useTexture(gokuImage);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  return <Environment map={texture} />;
+}
 
 function TouchParticles({ trigger }: { trigger: number }) {
   const pointsRef = useRef<THREE.Points>(null);
@@ -109,7 +116,7 @@ export default function AvatarCanvas({ mode = 'Work', isRunning = false }: { mod
         
         <Suspense fallback={<Text position={[0, 0, 0]} fontSize={0.2} color="white">Waking AI...</Text>}>
           <AICore mode={mode} isRunning={isRunning} />
-          <Environment files="/goku_vegeta.png" />
+          <CustomEnv />
           <ContactShadows position={[0, -1.5, 0]} opacity={0.6} scale={10} blur={2.5} far={4} color="#0ea5e9" />
         </Suspense>
       </Canvas>
