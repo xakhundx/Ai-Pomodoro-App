@@ -206,3 +206,38 @@ h1, h2, h3 {
   left: 3px;
   top: -1px;
 }
+
+/* Responsive Mobile Layout */
+@media (max-width: 850px) {
+  body {
+    overflow: auto;
+  }
+  .app-container {
+    height: auto;
+    min-height: 100vh;
+    display: block;
+  }
+  .canvas-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+  }
+  .ui-layer {
+    position: relative;
+    height: auto;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 1.5rem;
+    padding: 1.5rem 1rem;
+    overflow-y: visible;
+  }
+  .panel-left, .panel-right {
+    width: 100%;
+  }
+  .panel-right {
+    order: -1;
+  }
+}
