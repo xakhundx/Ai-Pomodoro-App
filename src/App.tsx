@@ -116,6 +116,14 @@ function App() {
   // Panel Collapse States
   const [isLeftOpen, setIsLeftOpen] = useState(true);
   const [isRightOpen, setIsRightOpen] = useState(true);
+  
+  // Customization
+  const [assistantName, setAssistantName] = useState(() => localStorage.getItem('assistantName') || 'AI Core Assistant');
+  const [isEditingName, setIsEditingName] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('assistantName', assistantName);
+  }, [assistantName]);
 
   // Save to localStorage
   useEffect(() => {
@@ -259,7 +267,37 @@ function App() {
         {/* Left Panel: AI Assistant Chat */}
         <div className={`panel-wrapper panel-wrapper-left ${isLeftOpen ? '' : 'closed'}`}>
           <div className="panel panel-left">
-            <h2>AI Core Assistant</h2>
+            {isEditingName ? (
+              <input
+                type="text"
+                value={assistantName}
+                onChange={(e) => setAssistantName(e.target.value)}
+                onBlur={() => setIsEditingName(false)}
+                onKeyDown={(e) => e.key === 'Enter' && setIsEditingName(false)}
+                autoFocus
+                style={{
+                  fontSize: '1.5rem',
+                  fontWeight: 600,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: '2px solid var(--primary)',
+                  color: 'white',
+                  outline: 'none',
+                  width: '100%',
+                  margin: '0',
+                  fontFamily: 'inherit'
+                }}
+              />
+            ) : (
+              <h2 
+                onClick={() => setIsEditingName(true)}
+                style={{ cursor: 'pointer', margin: 0, display: 'flex', alignItems: 'center' }}
+                title="Click to rename"
+              >
+                {assistantName}
+                <span style={{ fontSize: '0.8rem', opacity: 0.4, marginLeft: '8px', fontWeight: 'normal' }}>✎</span>
+              </h2>
+            )}
           
           <input 
             type="password" 
