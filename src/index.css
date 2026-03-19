@@ -161,10 +161,23 @@ body {
 
 .panel-left {
   width: 320px;
+  resize: horizontal;
+  overflow: auto;
+  min-width: 250px;
+  max-width: 50vw;
 }
 
 .panel-right {
   width: 380px;
+  resize: horizontal;
+  direction: rtl; 
+  overflow: auto;
+  min-width: 300px;
+  max-width: 50vw;
+}
+
+.panel-right > * {
+  direction: ltr; /* Re-flow inner content correctly */
 }
 
 /* Animations */

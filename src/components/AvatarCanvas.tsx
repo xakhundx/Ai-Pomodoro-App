@@ -3,56 +3,96 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text } from '@react-three/drei';
 import * as THREE from 'three';
 
+function TouchParticles({ trigger }: { trigger: number }) {
+  const pointsRef = useRef<THREE.Points>(null);
+  const [particles, setParticles] = useState<Float32Array | null>(null);
+  const opacities = useRef<number[]>([]);
+
+  useEffect(() => {
+    if (trigger > 0) {
+      const newParticles = new Float32Array(150 * 3);
+      const newOpacities = [];
+      for(let i=0; i<150 * 3; i++) {
+        newParticles[i] = (Math.random() - 0.5) * 5; 
+      }
+      for(let i=0; i<150; i++) newOpacities.push(1);
+      setParticles(newParticles);
+      opacities.current = newOpacities;
+    }
+  }, [trigger]);
+
+  useFrame(() => {
+    if (pointsRef.current && particles && opacities.current.length) {
+      const positions = pointsRef.current.geometry.attributes.position.array as Float32Array;
+      for(let i=0; i<positions.length; i++) {
+        positions[i] *= 1.05; 
+      }
+      (pointsRef.current.material as THREE.PointsMaterial).opacity *= 0.9;
+      pointsRef.current.geometry.attributes.position.needsUpdate = true;
+    }
+  });
+
+  if (!particles || trigger === 0) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[particles, 3]} />
+      </bufferGeometry>
+      <pointsMaterial size={0.06} color="#00ffff" transparent opacity={1} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+    </points>
+  );
+}
+
 function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
   const coreRef = useRef<THREE.Mesh>(null);
   const [hovered, setHover] = useState(false);
+  const [clickTrigger, setClickTrigger] = useState(0);
 
   useFrame((state) => {
     if (coreRef.current) {
       if (isRunning && mode === 'Work') {
-        // Breathe faster and rotate slightly faster
         coreRef.current.rotation.y += 0.01;
         coreRef.current.rotation.x += 0.005;
-        const scale = 1 + Math.sin(state.clock.elapsedTime * 2) * 0.05;
+        const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 2) * 0.05;
         coreRef.current.scale.set(scale, scale, scale);
       } else if (isRunning && mode === 'Break') {
-        // Spin lazily and breathe very slowly
         coreRef.current.rotation.y += 0.002;
-        const scale = 1 + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
+        const scale = (hovered ? 0.8 : 1) + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
         coreRef.current.scale.set(scale, scale, scale);
       } else {
-        // Idle/Paused state
         coreRef.current.rotation.y = state.clock.elapsedTime * 0.2;
         coreRef.current.rotation.x = state.clock.elapsedTime * 0.1;
-        const targetScale = hovered ? 1.05 : 1;
-        // Smooth scaling back to normal
+        const targetScale = hovered ? 0.8 : 1;
         coreRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
       }
       
-      // Floating animation
       coreRef.current.position.y = Math.sin(state.clock.elapsedTime) * 0.1;
     }
   });
 
   return (
-    <Sphere 
-      ref={coreRef}
-      args={[1, 128, 128]} 
-      onPointerOver={() => setHover(true)} 
-      onPointerOut={() => setHover(false)}
-      scale={hovered ? 1.05 : 1}
-    >
-      <MeshDistortMaterial 
-        color={hovered ? "#ffffff" : "#00bfff"} 
-        attach="material" 
-        distort={isRunning && mode === 'Work' ? 0.65 : 0.4} 
-        speed={isRunning && mode === 'Work' ? 5 : (isRunning && mode === 'Break' ? 1 : 2.5)} 
-        roughness={0.05} 
-        metalness={0.95}
-        emissive={hovered ? "#00ffff" : "#0047ab"}
-        emissiveIntensity={hovered ? 1.2 : 0.8}
-      />
-    </Sphere>
+    <group>
+      <Sphere 
+        ref={coreRef}
+        args={[1, 128, 128]} 
+        onPointerOver={() => setHover(true)} 
+        onPointerOut={() => setHover(false)}
+        onPointerDown={() => setClickTrigger(prev => prev + 1)}
+      >
+        <MeshDistortMaterial 
+          color={hovered ? "#ffffff" : "#00bfff"} 
+          attach="material" 
+          distort={isRunning && mode === 'Work' ? 0.65 : 0.4} 
+          speed={isRunning && mode === 'Work' ? 5 : (isRunning && mode === 'Break' ? 1 : 2.5)} 
+          roughness={0.05} 
+          metalness={0.95}
+          emissive={hovered ? "#00ffff" : "#0047ab"}
+          emissiveIntensity={hovered ? 1.2 : 0.8}
+        />
+      </Sphere>
+      <TouchParticles trigger={clickTrigger} />
+    </group>
   );
 }
 

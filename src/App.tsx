@@ -89,6 +89,30 @@ function App() {
     recognition.start();
   };
 
+  const [isEditingTimer, setIsEditingTimer] = useState(false);
+  const [timerInput, setTimerInput] = useState('');
+
+  const handleTimerClick = () => {
+    if (isRunning) return;
+    setIsEditingTimer(true);
+    setTimerInput(Math.floor(timeLeft / 60).toString());
+  };
+
+  const handleTimerSubmit = () => {
+    setIsEditingTimer(false);
+    const parsed = parseInt(timerInput);
+    if (!isNaN(parsed) && parsed > 0) {
+      setTimeLeft(parsed * 60);
+      if (mode === 'Work') {
+        setWorkDuration(parsed);
+        localStorage.setItem('pomodoro-work-time', parsed.toString());
+      } else {
+        setBreakDuration(parsed);
+        localStorage.setItem('pomodoro-break-time', parsed.toString());
+      }
+    }
+  };
+
   // Panel Collapse States
   const [isLeftOpen, setIsLeftOpen] = useState(true);
   const [isRightOpen, setIsRightOpen] = useState(true);
@@ -170,6 +194,19 @@ function App() {
 
   const updateTaskText = (id: string, newText: string) => {
     setTasks(tasks.map(t => t.id === id ? { ...t, text: newText } : t));
+  };
+
+  const [draggedTaskIndex, setDraggedTaskIndex] = useState<number | null>(null);
+
+  const handleDragStart = (index: number) => setDraggedTaskIndex(index);
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+  const handleDrop = (index: number) => {
+    if (draggedTaskIndex === null || draggedTaskIndex === index) return;
+    const newTasks = [...tasks];
+    const [movedTask] = newTasks.splice(draggedTaskIndex, 1);
+    newTasks.splice(index, 0, movedTask);
+    setTasks(newTasks);
+    setDraggedTaskIndex(null);
   };
 
   const deleteTask = (id: string) => {
@@ -272,9 +309,23 @@ function App() {
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '5rem', fontWeight: 800, textAlign: 'center', margin: '0', fontFamily: 'monospace', textShadow: '0 0 30px var(--primary-glow)', color: 'white', letterSpacing: '-2px' }}>
-            {mins}:{secs}
-          </div>
+          {isEditingTimer ? (
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <input 
+                type="number"
+                value={timerInput}
+                onChange={(e) => setTimerInput(e.target.value)}
+                onBlur={handleTimerSubmit}
+                onKeyDown={(e) => e.key === 'Enter' && handleTimerSubmit()}
+                autoFocus
+                style={{ fontSize: '5rem', fontWeight: 800, textAlign: 'center', margin: '0', fontFamily: 'monospace', background: 'transparent', border: 'none', color: 'white', outline: 'none', width: '100%', textShadow: '0 0 30px var(--primary-glow)' }}
+              />
+            </div>
+          ) : (
+            <div onClick={handleTimerClick} style={{ fontSize: '5rem', fontWeight: 800, textAlign: 'center', margin: '0', fontFamily: 'monospace', textShadow: '0 0 30px var(--primary-glow)', color: 'white', letterSpacing: '-2px', cursor: isRunning ? 'default' : 'text' }} title={isRunning ? '' : 'Click to edit'}>
+              {mins}:{secs}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
             <button style={{ flex: 1 }} onClick={toggleTimer}>
               {isRunning ? 'Pause' : 'Start Focus'}
@@ -292,8 +343,16 @@ function App() {
           </div>
           
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto', overflowX: 'hidden', flex: 1, minHeight: '150px' }}>
-            {tasks.map(task => (
-              <li key={task.id} className="task-item" style={{ opacity: task.completed ? 0.6 : 1 }}>
+            {tasks.map((task, index) => (
+              <li 
+                key={task.id} 
+                className="task-item" 
+                style={{ opacity: task.completed ? 0.6 : 1, cursor: 'grab' }}
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={handleDragOver}
+                onDrop={() => handleDrop(index)}
+              >
                 <input 
                   type="checkbox" 
                   className="task-checkbox" 
