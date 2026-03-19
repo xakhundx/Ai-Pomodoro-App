@@ -2,7 +2,7 @@
 
 :root {
   --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  --glass-bg: rgba(2, 6, 23, 0.7); /* Deepened for intensity */
+  --glass-bg: rgba(15, 23, 42, 0.5);
   --glass-border: rgba(192, 132, 252, 0.25);
   --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
   --primary: #c084fc; /* Ultra Ego Purple */

@@ -43,7 +43,7 @@ function TouchParticles({ trigger }: { trigger: number }) {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[particles, 3]} />
       </bufferGeometry>
-      <pointsMaterial size={0.06} color="#00ffff" transparent opacity={1} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
+      <pointsMaterial size={0.06} color="#10b981" transparent opacity={1} sizeAttenuation blending={THREE.AdditiveBlending} depthWrite={false} />
     </points>
   );
 }
