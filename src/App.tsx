@@ -117,13 +117,58 @@ function App() {
   const [isLeftOpen, setIsLeftOpen] = useState(true);
   const [isRightOpen, setIsRightOpen] = useState(true);
   
-  // Customization
+  // Sound Design Engine
+  const playSound = (type: 'ding' | 'hum') => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      if (type === 'ding') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.05, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.3);
+      } else if (type === 'hum') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(110, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(55, ctx.currentTime + 1.5);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 1.5);
+      }
+    } catch(e) { console.error('Audio failed', e); }
+  };
+
+  // Gamification & Customization
   const [assistantName, setAssistantName] = useState(() => localStorage.getItem('assistantName') || 'AI Core Assistant');
   const [isEditingName, setIsEditingName] = useState(false);
+  const [aiPersonality, setAiPersonality] = useState(() => localStorage.getItem('aiPersonality') || 'Mentor');
+  const [powerLevel, setPowerLevel] = useState(() => parseInt(localStorage.getItem('powerLevel') || '9000'));
 
   useEffect(() => {
     localStorage.setItem('assistantName', assistantName);
-  }, [assistantName]);
+    localStorage.setItem('aiPersonality', aiPersonality);
+    localStorage.setItem('powerLevel', powerLevel.toString());
+  }, [assistantName, aiPersonality, powerLevel]);
+
+  // Dynamic Browser Tab Title
+  useEffect(() => {
+    const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+    const secs = (timeLeft % 60).toString().padStart(2, '0');
+    document.title = isRunning ? `(${mins}:${secs}) ${mode} - AI Core` : 'AI Pomodoro';
+  }, [timeLeft, isRunning, mode]);
 
   // Save to localStorage
   useEffect(() => {
@@ -165,10 +210,11 @@ function App() {
     if (isRunning && timeLeft > 0) {
       interval = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
     } else if (timeLeft === 0 && isRunning) {
-      playCompletionChime();
+      playSound('hum'); // Aura power up
       setIsRunning(false);
       handleAIInteraction(`The ${mode} session has elapsed. What should I prioritize next?`);
       if (mode === 'Work') {
+        setPowerLevel(p => p + 500); // Zen focus bonus!
         setMode('Break');
         setTimeLeft(breakDuration * 60);
       } else {
@@ -179,7 +225,10 @@ function App() {
     return () => clearInterval(interval);
   }, [isRunning, timeLeft, mode, workDuration, breakDuration]);
 
-  const toggleTimer = () => setIsRunning(!isRunning);
+  const toggleTimer = () => {
+    if (!isRunning) playSound('hum'); // Aura flare up sound
+    setIsRunning(!isRunning);
+  };
   const switchMode = (newMode: 'Work' | 'Break') => {
     setIsRunning(false);
     setMode(newMode);
@@ -194,9 +243,12 @@ function App() {
   };
 
   const toggleTask = (id: string, text: string, completed: boolean) => {
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !t.completed } : t));
-    if (!completed) {
-      handleAIInteraction(`Task status update: Just completed "${text}".`);
+    const nextCompleted = !completed;
+    setTasks(tasks.map(t => t.id === id ? { ...t, completed: nextCompleted } : t));
+    if (nextCompleted) {
+      playSound('ding');
+      setPowerLevel(prev => prev + 50); // Power up on task complete
+      handleAIInteraction(`Task status update: Just completed "${text}". Acknowledge this with a very short, punchy 1-sentence motivation.`);
     }
   };
 
@@ -238,8 +290,13 @@ function App() {
     setIsTyping(true);
     setChatMessage("Processing..."); // typing indicator
     
+    const personaContext = 
+      aiPersonality === 'Mentor' ? '[You are Whis, an elegant, highly intelligent angelic mentor. Speak calmly and politely.] ' :
+      aiPersonality === 'Rival' ? '[You are Vegeta, Prince of Saiyans. You are stern, aggressive, demand focus, and call the user "warrior".] ' :
+      '[You are Goku! You are extremely high-energy, super encouraging, and always celebrate hard work loudly!] ';
+
     // Call Gemini Service
-    const response = await askGemini(userApiKey, prompt, tasks, { mode, timeLeft });
+    const response = await askGemini(userApiKey, personaContext + prompt, tasks, { mode, timeLeft });
     setChatMessage(response);
     setIsTyping(false);
   };
@@ -298,6 +355,23 @@ function App() {
                 <span style={{ fontSize: '0.8rem', opacity: 0.4, marginLeft: '8px', fontWeight: 'normal' }}>✎</span>
               </h2>
             )}
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Persona:</span>
+            <select 
+              value={aiPersonality} 
+              onChange={(e) => setAiPersonality(e.target.value)}
+              style={{
+                background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid var(--glass-border)',
+                padding: '4px 8px', borderRadius: '6px', fontSize: '0.8rem', outline: 'none', cursor: 'pointer',
+                flex: 1
+              }}
+            >
+              <option value="Mentor" style={{color: 'black'}}>Whis (Mentor)</option>
+              <option value="Rival" style={{color: 'black'}}>Vegeta (Rival)</option>
+              <option value="Optimist" style={{color: 'black'}}>Goku (Optimist)</option>
+            </select>
+          </div>
           
           <input 
             type="password" 
@@ -391,7 +465,12 @@ function App() {
           <div style={{ height: '1px', background: 'var(--glass-border)', margin: '0.5rem 0' }}></div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3>Your Tasks</h3>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <h3>Your Tasks</h3>
+              <span style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 800, textShadow: '0 0 10px var(--primary-glow)', marginTop: '4px' }}>
+                POWER LEVEL: {powerLevel.toLocaleString()}
+              </span>
+            </div>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{completedCount}/{tasks.length} done</span>
           </div>
           
