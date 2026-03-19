@@ -77,8 +77,9 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
         coreRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
       }
       
-      // Gentle sway instead of full rotation so the image remains uncropped and front-facing
-      coreRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.15;
+      // Spinning top rotation: sweeps back and forth perfectly across the image to show both characters
+      const spinSpeed = isRunning && mode === 'Work' ? 0.8 : 0.3;
+      coreRef.current.rotation.y = Math.sin(state.clock.elapsedTime * spinSpeed) * (Math.PI / 2);
       coreRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.3) * 0.05;
       coreRef.current.position.y = Math.sin(state.clock.elapsedTime) * 0.1;
     }
