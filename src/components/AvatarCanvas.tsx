@@ -109,7 +109,7 @@ export default function AvatarCanvas({ mode = 'Work', isRunning = false }: { mod
         
         <Suspense fallback={<Text position={[0, 0, 0]} fontSize={0.2} color="white">Waking AI...</Text>}>
           <AICore mode={mode} isRunning={isRunning} />
-          <Environment preset="city" />
+          <Environment files="/goku_vegeta.png" />
           <ContactShadows position={[0, -1.5, 0]} opacity={0.6} scale={10} blur={2.5} far={4} color="#0ea5e9" />
         </Suspense>
       </Canvas>
