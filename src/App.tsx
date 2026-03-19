@@ -163,13 +163,6 @@ function App() {
     localStorage.setItem('powerLevel', powerLevel.toString());
   }, [assistantName, aiPersonality, powerLevel]);
 
-  // Dynamic Browser Tab Title
-  useEffect(() => {
-    const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
-    const secs = (timeLeft % 60).toString().padStart(2, '0');
-    document.title = isRunning ? `(${mins}:${secs}) ${mode} - AI Core` : 'AI Pomodoro';
-  }, [timeLeft, isRunning, mode]);
-
   // Save to localStorage
   useEffect(() => {
     localStorage.setItem('pomodoro-tasks', JSON.stringify(tasks));
