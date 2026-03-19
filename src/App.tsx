@@ -54,6 +54,43 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [newTaskText, setNewTaskText] = useState('');
+  
+  // Voice Dictation State
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleListening = () => {
+    if (isListening) {
+      if (recognitionRef.current) recognitionRef.current.stop();
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser does not support Speech Recognition. Please try Chrome or Edge.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.continuous = false;
+    recognition.interimResults = true;
+
+    let baseText = newTaskText;
+    if (baseText && !baseText.endsWith(' ')) baseText += ' ';
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results)
+        .map((result: any) => result[0].transcript)
+        .join('');
+      setNewTaskText(baseText + transcript);
+    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
+
+    recognition.start();
+  };
 
   // Save to localStorage
   useEffect(() => {
@@ -235,6 +272,14 @@ function App() {
             ))}
           </ul>
           <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
+            <button 
+              className="outline"
+              style={{ padding: '0.75rem', background: isListening ? 'rgba(239, 68, 68, 0.2)' : 'transparent', borderColor: isListening ? '#ef4444' : 'var(--primary)' }}
+              onClick={toggleListening}
+              title="Dictate Task"
+            >
+              {isListening ? '🛑' : '🎤'}
+            </button>
             <input 
               type="text" 
               className="input-field" 
