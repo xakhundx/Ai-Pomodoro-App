@@ -37,7 +37,7 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
   return (
     <Sphere 
       ref={coreRef}
-      args={[1, 64, 64]} 
+      args={[1, 128, 128]} 
       onPointerOver={() => setHover(true)} 
       onPointerOut={() => setHover(false)}
       scale={hovered ? 1.05 : 1}
@@ -59,7 +59,7 @@ function AICore({ mode, isRunning }: { mode: string, isRunning: boolean }) {
 export default function AvatarCanvas({ mode = 'Work', isRunning = false }: { mode?: string, isRunning?: boolean }) {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Canvas camera={{ position: [0, 0, 3.5], fov: 45 }} gl={{ alpha: true }}>
+      <Canvas dpr={[1, 2]} camera={{ position: [0, 0, 3.5], fov: 45 }} gl={{ alpha: true, antialias: true }}>
         <ambientLight intensity={1} />
         <directionalLight position={[2, 2, -2]} intensity={2} castShadow />
         <spotLight position={[-2, 2, 2]} intensity={2} color="#38bdf8" />
