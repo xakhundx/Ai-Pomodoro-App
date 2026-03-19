@@ -175,6 +175,13 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState<'Work' | 'Break'>('Work');
 
+  // Dynamic Browser Tab Title
+  useEffect(() => {
+    const mins = Math.floor(timeLeft / 60).toString().padStart(2, '0');
+    const secs = (timeLeft % 60).toString().padStart(2, '0');
+    document.title = isRunning ? `(${mins}:${secs}) ${mode} - AI Core` : 'AI Pomodoro';
+  }, [timeLeft, isRunning, mode]);
+
   useEffect(() => {
     localStorage.setItem('pomodoro-work-time', workDuration.toString());
     localStorage.setItem('pomodoro-break-time', breakDuration.toString());
