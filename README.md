@@ -1,4 +1,4 @@
-# 🧠 AI-Powered Pomodoro Focus App
+# 🧠 AI-Powered Pomodoro Focus Apppp
 
 Welcome to the **AI-Powered Pomodoro Focus App**! This project was built primarily as an **advanced, personalized tool for studying**. Instead of using standard, basic Pomodoro websites, I wanted a highly customized version that integrates an interactive 3D AI assistant to help me prioritize tasks, stay motivated, and manage my study sessions efficiently.
 
