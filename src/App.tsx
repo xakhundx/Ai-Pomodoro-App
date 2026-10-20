@@ -27,6 +27,57 @@ interface FeedbackEntry {
   createdAt: string;
 }
 
+interface MusicPreset {
+  id: string;
+  label: string;
+  embedUrl: string;
+  platform: 'Spotify' | 'Apple Music';
+}
+
+const MUSIC_PRESETS: MusicPreset[] = [
+  {
+    id: 'lofi-focus',
+    label: '🎧 Deep Focus Lo-Fi Beats',
+    embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0',
+    platform: 'Spotify',
+  },
+  {
+    id: 'anime-hype',
+    label: '🔥 Anime Training & Phonk',
+    embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DX0hWmn8d5pRe?utm_source=generator&theme=0',
+    platform: 'Spotify',
+  },
+  {
+    id: 'synthwave',
+    label: '🤖 Cyberpunk Synthwave',
+    embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DXdLEN7aqioXM?utm_source=generator&theme=0',
+    platform: 'Spotify',
+  },
+];
+
+function convertToMusicEmbedUrl(rawUrl: string): string | null {
+  const url = rawUrl.trim();
+  if (!url) return null;
+
+  // Already an embed URL
+  if (url.includes('open.spotify.com/embed/') || url.includes('embed.music.apple.com/')) {
+    return url;
+  }
+
+  // Convert standard Spotify link: https://open.spotify.com/playlist/xyz -> https://open.spotify.com/embed/playlist/xyz
+  if (url.includes('open.spotify.com/')) {
+    const clean = url.split('?')[0];
+    return clean.replace('open.spotify.com/', 'open.spotify.com/embed/') + '?utm_source=generator&theme=0';
+  }
+
+  // Convert standard Apple Music link: https://music.apple.com/... -> https://embed.music.apple.com/...
+  if (url.includes('music.apple.com/')) {
+    return url.replace('music.apple.com/', 'embed.music.apple.com/');
+  }
+
+  return null;
+}
+
 function App() {
   // 1. User Onboarding & Gmail Sign-In State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
@@ -49,6 +100,10 @@ function App() {
     }
   });
 
+  // Check if current signed-in user is the Owner (Ammar Akhund)
+  const isOwner =
+    userProfile?.gmail?.trim().toLowerCase() === APP_CONFIG.OWNER_EMAIL.toLowerCase();
+
   // Onboarding Form Inputs
   const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(() => !userProfile);
   const [nicknameInput, setNicknameInput] = useState(userProfile?.nickname || '');
@@ -58,11 +113,42 @@ function App() {
   );
   const [onboardingError, setOnboardingError] = useState('');
 
-  // Active Modals
+  // Active Modals & Docks
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showAchievementsModal, setShowAchievementsModal] = useState(false);
   const [showUsersModal, setShowUsersModal] = useState(false);
+  const [showMusicDock, setShowMusicDock] = useState(false);
+  const [showReminderSyncModal, setShowReminderSyncModal] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
+
+  // Pro Tier Status
+  const [isProMember, setIsProMember] = useState<boolean>(() => {
+    return localStorage.getItem('pomodoro-pro-member') === 'true';
+  });
+
+  // Music Hub State
+  const [activeMusicEmbed, setActiveMusicEmbed] = useState<string>(() => {
+    return localStorage.getItem('pomodoro-music-embed') || MUSIC_PRESETS[0].embedUrl;
+  });
+  const [customMusicUrlInput, setCustomMusicUrlInput] = useState('');
+  const [musicError, setMusicError] = useState('');
+
+  // Post-Session Reminder & Calendar/OneNote Sync State
+  const [sessionReminderText, setSessionReminderText] = useState<string>(
+    () => localStorage.getItem('pomodoro-session-reminder') || ''
+  );
+  const [reminderAlertBanner, setReminderAlertBanner] = useState<string | null>(null);
+  const [syncSuccessMsg, setSyncSuccessMsg] = useState<string>('');
+
+  useEffect(() => {
+    localStorage.setItem('pomodoro-session-reminder', sessionReminderText);
+  }, [sessionReminderText]);
+
+  // Webhook URL state (configurable by Owner in Admin Panel)
+  const [webhookUrl, setWebhookUrl] = useState<string>(
+    () => localStorage.getItem('pomodoro-webhook-url') || APP_CONFIG.USER_TRACKING_WEBHOOK_URL
+  );
 
   // Theme State
   const [activeTheme, setActiveTheme] = useState<AppTheme>(() => {
@@ -145,7 +231,7 @@ function App() {
   const currentPersona =
     activeTheme.personas.find(p => p.id === aiPersonality) || activeTheme.personas[0];
 
-  // Sound Design Engine (including Over 9000 Fanfare!)
+  // Sound Design Engine
   const playSound = (type: 'ding' | 'hum' | 'achievement' | 'over9000') => {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -288,7 +374,6 @@ function App() {
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    // Seed with existing text in the input box
     finalizedTextRef.current = newTaskText.trim() ? `${newTaskText.trim()} ` : '';
 
     recognition.onstart = () => {
@@ -358,7 +443,7 @@ function App() {
     const secs = (timeLeft % 60).toString().padStart(2, '0');
     document.title = isRunning
       ? `(${mins}:${secs}) ${mode} - ${activeTheme.name}`
-      : `${activeTheme.name} Pomodoro`;
+      : `Focus Arena by ${APP_CONFIG.OWNER_NAME}`;
   }, [timeLeft, isRunning, mode, activeTheme.name]);
 
   useEffect(() => {
@@ -397,14 +482,25 @@ function App() {
     if (!isRunning && mode === 'Break') setTimeLeft(val * 60);
   };
 
-  // Timer Countdown Logic
+  // Timer Countdown Logic + Post-Session Reminder Alert
   useEffect(() => {
     let interval: number | undefined;
     if (isRunning && timeLeft > 0) {
       interval = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
     } else if (timeLeft === 0 && isRunning) {
-      playSound('hum');
+      playSound('achievement');
       setIsRunning(false);
+
+      // Trigger Post-Session Reminder if set!
+      if (sessionReminderText.trim()) {
+        setReminderAlertBanner(sessionReminderText.trim());
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('⏰ Post-Session Reminder — Focus Arena', {
+            body: sessionReminderText.trim(),
+          });
+        }
+      }
+
       if (mode === 'Work') {
         const nextPower = powerLevel + APP_CONFIG.POWER_PER_POMODORO;
         setPowerLevel(nextPower);
@@ -421,7 +517,7 @@ function App() {
       }
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, mode, workDuration, breakDuration, powerLevel]);
+  }, [isRunning, timeLeft, mode, workDuration, breakDuration, powerLevel, sessionReminderText]);
 
   const toggleTimer = () => {
     if (!isRunning) playSound('hum');
@@ -480,7 +576,9 @@ function App() {
   const handleClearAllTasks = () => {
     if (tasks.length === 0) return;
     setTasks([]);
-    setChatMessage(`Task list cleared clean, ${userProfile?.nickname || assistantName}! Ready for a fresh batch of objectives.`);
+    setChatMessage(
+      `Task list cleared clean, ${userProfile?.nickname || assistantName}! Ready for a fresh batch of objectives.`
+    );
   };
 
   const handleResetPowerLevel = () => {
@@ -541,7 +639,7 @@ function App() {
     }
   };
 
-  // Onboarding & Gmail Sign-In Handler
+  // Onboarding & Gmail Sign-In Handler + Automated Welcome Email Trigger
   const handleOnboardingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanNickname = nicknameInput.trim();
@@ -581,11 +679,18 @@ function App() {
     setUserRegistry(updatedRegistry);
     localStorage.setItem('pomodoro-user-registry', JSON.stringify(updatedRegistry));
 
-    if (APP_CONFIG.USER_TRACKING_WEBHOOK_URL) {
-      fetch(APP_CONFIG.USER_TRACKING_WEBHOOK_URL, {
+    // Trigger Google Apps Script Webhook for Automated Welcome Email + Sheet Logging
+    const targetWebhook = webhookUrl || APP_CONFIG.USER_TRACKING_WEBHOOK_URL;
+    if (targetWebhook) {
+      fetch(targetWebhook, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProfile),
+        body: JSON.stringify({
+          type: 'signin',
+          ...newProfile,
+          owner: APP_CONFIG.OWNER_NAME,
+        }),
       }).catch(() => {});
     }
 
@@ -608,7 +713,7 @@ function App() {
     }
   };
 
-  // Submit In-App Feedback
+  // Submit In-App Feedback (also forwards to Owner Email via Webhook!)
   const handleFeedbackSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!feedbackMessage.trim()) return;
@@ -623,9 +728,106 @@ function App() {
     const nextList = [entry, ...feedbackList];
     setFeedbackList(nextList);
     localStorage.setItem('pomodoro-feedback-entries', JSON.stringify(nextList));
+
+    const targetWebhook = webhookUrl || APP_CONFIG.USER_TRACKING_WEBHOOK_URL;
+    if (targetWebhook) {
+      fetch(targetWebhook, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'feedback',
+          ...entry,
+        }),
+      }).catch(() => {});
+    }
+
     setFeedbackMessage('');
     setFeedbackSubmitted(true);
     setTimeout(() => setFeedbackSubmitted(false), 3500);
+  };
+
+  // Calendar (.ics & Google Calendar) + Microsoft OneNote Sync Helpers
+  const handleGoogleCalendarSync = () => {
+    const pendingTasks = tasks.filter(t => !t.completed).map(t => `• ${t.text}`).join('\n');
+    const title = encodeURIComponent(`⚡ Focus Arena Session (${activeTheme.name})`);
+    const details = encodeURIComponent(
+      `Focus Session in Focus Arena by ${APP_CONFIG.OWNER_NAME}\n\nTasks to Complete:\n${
+        pendingTasks || '• Deep Focus Session'
+      }\n\nReminder after session: ${sessionReminderText || 'None'}`
+    );
+    const start = new Date();
+    const end = new Date(start.getTime() + workDuration * 60000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${fmt(
+      start
+    )}/${fmt(end)}`;
+    window.open(gcalUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleDownloadIcsCalendar = () => {
+    const start = new Date();
+    const end = new Date(start.getTime() + workDuration * 60000);
+    const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const pendingTasks = tasks.filter(t => !t.completed).map(t => `- ${t.text}`).join('\\n');
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Focus Arena by Ammar Akhund//EN',
+      'BEGIN:VEVENT',
+      `DTSTART:${fmt(start)}`,
+      `DTEND:${fmt(end)}`,
+      `SUMMARY:Focus Arena Session (${activeTheme.name})`,
+      `DESCRIPTION:Tasks:\\n${pendingTasks || 'Deep Focus'}\\nReminder: ${sessionReminderText || 'None'}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'focus-arena-session.ics';
+    link.click();
+    setSyncSuccessMsg('✓ Downloaded .ics Calendar event for Outlook / Apple Calendar!');
+    setTimeout(() => setSyncSuccessMsg(''), 3500);
+  };
+
+  const handleOneNoteSync = () => {
+    const dateStr = new Date().toLocaleDateString();
+    const noteBody = [
+      `📓 FOCUS ARENA — SESSION NOTES (${dateStr})`,
+      `Theme: ${activeTheme.name} | ${activeTheme.powerLabel}: ${powerLevel.toLocaleString()}`,
+      `Post-Session Reminder: ${sessionReminderText || 'None'}`,
+      ``,
+      `✅ COMPLETED TASKS:`,
+      ...(tasks.filter(t => t.completed).map(t => `[x] ${t.text}`) || ['None yet']),
+      ``,
+      `⏳ PENDING TASKS:`,
+      ...(tasks.filter(t => !t.completed).map(t => `[ ] ${t.text}`) || ['All clear!']),
+      ``,
+      `— Exported from Focus Arena by ${APP_CONFIG.OWNER_NAME}`,
+    ].join('\n');
+
+    navigator.clipboard.writeText(noteBody).then(() => {
+      setSyncSuccessMsg(
+        '✓ Structured checklist copied! Paste (Ctrl+V) directly into Microsoft OneNote or Notion!'
+      );
+      setTimeout(() => setSyncSuccessMsg(''), 4500);
+    });
+  };
+
+  // Export CSV for Owner Admin
+  const handleExportUsersCsv = () => {
+    const rows = [
+      ['Nickname', 'Gmail', 'Theme Interest', 'Joined At', 'Last Active'],
+      ...userRegistry.map(u => [u.nickname, u.gmail, u.interestPrompt, u.joinedAt, u.lastActive]),
+    ];
+    const csv = rows.map(r => r.map(v => `"${(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'focus-arena-users.csv';
+    link.click();
   };
 
   // Format Time
@@ -688,6 +890,28 @@ function App() {
         </div>
       )}
 
+      {/* Post-Session Reminder Pop-Up Alert */}
+      {reminderAlertBanner && (
+        <div className="achievement-toast major" style={{ top: '9.5rem' }}>
+          <div style={{ fontSize: '2.2rem' }}>⏰</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#fde047', letterSpacing: '1px' }}>
+              POST-SESSION REMINDER
+            </div>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: '#fff', marginTop: '2px' }}>
+              {reminderAlertBanner}
+            </div>
+          </div>
+          <button
+            className="outline"
+            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+            onClick={() => setReminderAlertBanner(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Top Navigation & Community Bar */}
       <div className="top-nav-bar">
         <button
@@ -700,9 +924,23 @@ function App() {
           }}
           title="Edit Nickname, Gmail Sign-In, or Interest"
         >
-          <span>👤 {userProfile?.nickname || assistantName}</span>
-          {userProfile?.gmail && (
-            <span style={{ opacity: 0.65, fontSize: '0.72rem' }}>({userProfile.gmail})</span>
+          <span>
+            {isOwner ? '👑 ' : '👤 '}
+            {userProfile?.nickname || assistantName}
+          </span>
+          {isProMember && (
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #facc15, #f97316)',
+                color: '#090d16',
+                fontSize: '0.65rem',
+                fontWeight: 900,
+                padding: '1px 6px',
+                borderRadius: '999px',
+              }}
+            >
+              PRO
+            </span>
           )}
         </button>
 
@@ -719,25 +957,159 @@ function App() {
           onClick={() => setShowAchievementsModal(true)}
           title="View Power Milestones & Achievement Queue"
         >
-          🏆 {unlockedAchievementIds.length}/{activeTheme.milestones.length} Milestones
+          🏆 {unlockedAchievementIds.length}/{activeTheme.milestones.length}
         </button>
 
         <button
           className="nav-pill"
           onClick={() => setShowUsersModal(true)}
-          title="View Signed-In Users & Activity"
+          title={
+            isOwner
+              ? 'Owner Admin Dashboard (View Emails & CSV)'
+              : 'View Active Warriors Leaderboard'
+          }
         >
-          🟢 {activeUsersCount} Active {activeUsersCount === 1 ? 'User' : 'Users'}
+          🟢 {activeUsersCount} {activeUsersCount === 1 ? 'Warrior' : 'Warriors'}
         </button>
 
         <button
           className="nav-pill"
           onClick={() => setShowFeedbackModal(true)}
           style={{ borderColor: 'var(--primary)' }}
-          title="Send Feedback via Google Forms or In-App"
+          title="Send Feedback to Ammar Akhund"
         >
           💬 Feedback
         </button>
+
+        <button
+          className="nav-pill"
+          onClick={() => setShowMusicDock(!showMusicDock)}
+          style={{
+            borderColor: showMusicDock ? '#22c55e' : 'rgba(255,255,255,0.16)',
+          }}
+          title="Open Spotify / Apple Music / Lo-Fi Focus Player"
+        >
+          🎵 Music
+        </button>
+
+        <button
+          className="nav-pill"
+          onClick={() => setShowReminderSyncModal(true)}
+          title="Set Post-Session Reminder & Sync with OneNote / Calendar"
+        >
+          ⏰ {sessionReminderText ? 'Reminder Set' : 'Reminder & Sync'}
+        </button>
+
+        <button
+          className="nav-pill"
+          onClick={() => setShowProModal(true)}
+          style={{
+            background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.28), rgba(59, 130, 246, 0.25))',
+            borderColor: '#facc15',
+          }}
+          title="Explore Focus Arena Pro & Creator Info"
+        >
+          💎 Pro
+        </button>
+      </div>
+
+      {/* Persistent Floating Music Dock (Keeps playing even when minimized!) */}
+      <div className={`music-floating-dock ${showMusicDock ? '' : 'minimized'}`}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 800, fontSize: '0.88rem' }}>
+            🎵 Live Music Hub (Spotify & Apple Music)
+          </span>
+          <button
+            type="button"
+            className="outline"
+            style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+            onClick={() => setShowMusicDock(false)}
+          >
+            Minimize ▾
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {MUSIC_PRESETS.map(preset => (
+            <button
+              key={preset.id}
+              type="button"
+              className={`theme-chip ${activeMusicEmbed === preset.embedUrl ? 'selected' : ''}`}
+              style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}
+              onClick={() => {
+                setActiveMusicEmbed(preset.embedUrl);
+                localStorage.setItem('pomodoro-music-embed', preset.embedUrl);
+                setMusicError('');
+              }}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+
+        <iframe
+          src={activeMusicEmbed}
+          width="100%"
+          height="152"
+          frameBorder="0"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"
+          style={{ borderRadius: '12px' }}
+          title="Focus Arena Music Player"
+        />
+
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <input
+            type="url"
+            className="input-field"
+            placeholder="Paste any Spotify or Apple Music playlist/song link..."
+            value={customMusicUrlInput}
+            onChange={e => setCustomMusicUrlInput(e.target.value)}
+            style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem' }}
+          />
+          <button
+            type="button"
+            style={{ padding: '0.5rem 0.85rem', fontSize: '0.78rem' }}
+            onClick={() => {
+              const converted = convertToMusicEmbedUrl(customMusicUrlInput);
+              if (!converted) {
+                setMusicError('Paste a valid open.spotify.com or music.apple.com link.');
+                return;
+              }
+              setActiveMusicEmbed(converted);
+              localStorage.setItem('pomodoro-music-embed', converted);
+              setCustomMusicUrlInput('');
+              setMusicError('');
+            }}
+          >
+            Load
+          </button>
+        </div>
+        {musicError && (
+          <div style={{ color: '#fca5a5', fontSize: '0.72rem' }}>{musicError}</div>
+        )}
+      </div>
+
+      {/* Creator Branding Footer Bar */}
+      <div className="creator-footer-bar">
+        <span>
+          ⚡ Built by <strong>{APP_CONFIG.OWNER_NAME}</strong>
+        </span>
+        <span>•</span>
+        <a href={APP_CONFIG.OWNER_LINKEDIN_URL} target="_blank" rel="noopener noreferrer">
+          LinkedIn ↗
+        </a>
+        <span>•</span>
+        <a href={APP_CONFIG.OWNER_GITHUB_URL} target="_blank" rel="noopener noreferrer">
+          GitHub ↗
+        </a>
+        <span>•</span>
+        <span
+          style={{ cursor: 'pointer', color: '#fde047', fontWeight: 700 }}
+          onClick={() => setShowProModal(true)}
+        >
+          💎 Focus Arena Pro ({APP_CONFIG.PRO_PRICE_DISPLAY})
+        </span>
       </div>
 
       {/* Main Two-Panel Floating UI */}
@@ -846,9 +1218,16 @@ function App() {
               <button
                 className="theme-chip"
                 style={{ fontSize: '0.72rem', padding: '0.32rem 0.65rem' }}
-                onClick={() => handleAIInteraction('What task should I prioritize next?')}
+                onClick={() => handleAIInteraction('How should I start and organize my tasks?')}
               >
-                ⚡ Next Task
+                ⚡ Organize Tasks
+              </button>
+              <button
+                className="theme-chip"
+                style={{ fontSize: '0.72rem', padding: '0.32rem 0.65rem' }}
+                onClick={() => handleAIInteraction('Hey, how are you doing today?')}
+              >
+                👋 Say Hello
               </button>
               <button
                 className="theme-chip"
@@ -857,19 +1236,12 @@ function App() {
               >
                 🔥 Motivate Me
               </button>
-              <button
-                className="theme-chip"
-                style={{ fontSize: '0.72rem', padding: '0.32rem 0.65rem' }}
-                onClick={() => handleAIInteraction('Check my power level progress!')}
-              >
-                📊 Power Check
-              </button>
             </div>
 
             <input
               type="text"
               className="input-field"
-              placeholder={`Ask ${currentPersona.characterName}...`}
+              placeholder={`Chat with ${currentPersona.characterName} or ask how to start...`}
               value={userInput}
               onChange={e => setUserInput(e.target.value)}
               onKeyDown={handleChatSubmit}
@@ -1259,7 +1631,12 @@ function App() {
         <div className="modal-backdrop">
           <form className="modal-card" onSubmit={handleOnboardingSubmit}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>Welcome to Focus Arena</h2>
+              <div>
+                <h2>Welcome to Focus Arena</h2>
+                <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: '2px' }}>
+                  Created by {APP_CONFIG.OWNER_NAME} ({APP_CONFIG.OWNER_HANDLE})
+                </div>
+              </div>
               {userProfile && (
                 <button
                   type="button"
@@ -1307,7 +1684,7 @@ function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0' }}>
-                2. Gmail Sign-In (Active User Tracking)
+                2. Gmail Sign-In (Private & Secure — Never Shown Publicly)
               </label>
               <input
                 type="email"
@@ -1536,12 +1913,14 @@ function App() {
         </div>
       )}
 
-      {/* MODAL 4: Active Users & Gmail Sign-In Tracker */}
+      {/* MODAL 4: Active Warriors Leaderboard (Public) vs Owner-Only Admin Dashboard */}
       {showUsersModal && (
         <div className="modal-backdrop" onClick={() => setShowUsersModal(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>🟢 Active Users Tracker</h2>
+              <h2>
+                {isOwner ? '👑 Owner Admin Dashboard' : '🟢 Active Focus Warriors'}
+              </h2>
               <button
                 className="outline"
                 style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
@@ -1550,51 +1929,125 @@ function App() {
                 ✕
               </button>
             </div>
-            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)' }}>
-              Tracks users who signed in with their Gmail and persona nickname.
-            </p>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
-              {userRegistry.length === 0 ? (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                  No registered users yet.
+            {isOwner ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div
+                  style={{
+                    padding: '0.75rem',
+                    borderRadius: '10px',
+                    background: 'rgba(250, 204, 21, 0.1)',
+                    border: '1px solid rgba(250, 204, 21, 0.35)',
+                    fontSize: '0.78rem',
+                    color: '#fef08a',
+                  }}
+                >
+                  👑 Signed in as Owner (<strong>{APP_CONFIG.OWNER_EMAIL}</strong>). Only you can view
+                  user Gmail addresses, export CSVs, and configure automated email webhooks.
                 </div>
-              ) : (
-                userRegistry.map((u, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '0.75rem 1rem',
-                      borderRadius: '12px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="url"
+                    className="input-field"
+                    placeholder="Paste Google Apps Script Web App URL for auto-emails..."
+                    value={webhookUrl}
+                    onChange={e => {
+                      setWebhookUrl(e.target.value);
+                      localStorage.setItem('pomodoro-webhook-url', e.target.value);
                     }}
+                    style={{ padding: '0.55rem 0.75rem', fontSize: '0.78rem', flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="outline"
+                    style={{ padding: '0.5rem 0.8rem', fontSize: '0.76rem' }}
+                    onClick={handleExportUsersCsv}
                   >
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>
-                        👤 {u.nickname}{' '}
-                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>
-                          ({u.interestPrompt})
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{u.gmail}</div>
-                    </div>
-                    <span
+                    📥 Export CSV
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    maxHeight: '240px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {userRegistry.map((u, idx) => (
+                    <div
+                      key={idx}
                       style={{
-                        fontSize: '0.72rem',
-                        color: '#4ade80',
-                        fontWeight: 700,
+                        padding: '0.75rem 1rem',
+                        borderRadius: '12px',
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
                       }}
                     >
-                      ● Active
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>
+                          👤 {u.nickname}{' '}
+                          <span style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>
+                            ({u.interestPrompt})
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#cbd5e1' }}>✉️ {u.gmail}</div>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: '#4ade80', fontWeight: 700 }}>
+                        ● Active
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted)' }}>
+                  Live community of warriors currently focusing. (User emails are strictly private and
+                  visible only to the app owner.)
+                </p>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    maxHeight: '260px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {userRegistry.map((u, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        padding: '0.75rem 1rem',
+                        borderRadius: '12px',
+                        background: 'rgba(255,255,255,0.05)',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, fontSize: '0.9rem' }}>
+                        👤 {u.nickname}{' '}
+                        <span style={{ fontSize: '0.75rem', color: 'var(--accent)', fontWeight: 600 }}>
+                          • {u.interestPrompt}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '0.72rem', color: '#4ade80', fontWeight: 700 }}>
+                        ● Focusing
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1627,19 +2080,21 @@ function App() {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                  📋 Official Google Feedback Form
+                  📋 Google Feedback Form Option
                 </span>
-                <button
-                  type="button"
-                  className="outline"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-                  onClick={() => setIsConfiguringFormUrl(!isConfiguringFormUrl)}
-                >
-                  {isConfiguringFormUrl ? 'Hide Link Setup' : '⚙️ Set Google Form URL'}
-                </button>
+                {isOwner && (
+                  <button
+                    type="button"
+                    className="outline"
+                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
+                    onClick={() => setIsConfiguringFormUrl(!isConfiguringFormUrl)}
+                  >
+                    {isConfiguringFormUrl ? 'Hide Link Setup' : '⚙️ Set Google Form URL'}
+                  </button>
+                )}
               </div>
 
-              {isConfiguringFormUrl && (
+              {isOwner && isConfiguringFormUrl && (
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="url"
@@ -1667,16 +2122,26 @@ function App() {
                   </button>
                 </a>
               ) : (
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Tip: You can paste your Google Form URL using <strong>⚙️ Set Google Form URL</strong>{' '}
-                  above (or in <code>src/config/appConfig.ts</code>), or submit quick feedback right
-                  below!
-                </div>
+                <a
+                  href={`mailto:${APP_CONFIG.OWNER_EMAIL}?subject=${encodeURIComponent(
+                    'Focus Arena Feedback'
+                  )}`}
+                  style={{ textDecoration: 'none' }}
+                >
+                  <button type="button" className="outline" style={{ width: '100%' }}>
+                    ✉️ Email Feedback Directly to {APP_CONFIG.OWNER_NAME} ↗
+                  </button>
+                </a>
               )}
             </div>
 
-            <form onSubmit={handleFeedbackSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ fontSize: '0.82rem', fontWeight: 700 }}>Quick Feedback Box:</div>
+            <form
+              onSubmit={handleFeedbackSubmit}
+              style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
+            >
+              <div style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                Instant In-App Feedback (Sent to {APP_CONFIG.OWNER_NAME}):
+              </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {[1, 2, 3, 4, 5].map(star => (
                   <button
@@ -1706,11 +2171,233 @@ function App() {
               />
               <button type="submit">Send Feedback</button>
               {feedbackSubmitted && (
-                <div style={{ color: '#4ade80', fontSize: '0.82rem', textAlign: 'center', fontWeight: 700 }}>
-                  ✓ Thank you! Your feedback has been recorded!
+                <div
+                  style={{
+                    color: '#4ade80',
+                    fontSize: '0.82rem',
+                    textAlign: 'center',
+                    fontWeight: 700,
+                  }}
+                >
+                  ✓ Thank you! Your feedback has been sent!
                 </div>
               )}
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 6: Post-Session Reminder + Calendar & Microsoft OneNote Sync */}
+      {showReminderSyncModal && (
+        <div className="modal-backdrop" onClick={() => setShowReminderSyncModal(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>⏰ Post-Session Reminder & Sync</h2>
+              <button
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowReminderSyncModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                1. Upcoming Post-Session Reminder (Pops up when timer finishes):
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="e.g., Message recruiter on LinkedIn, Call client, Stretch..."
+                  value={sessionReminderText}
+                  onChange={e => setSessionReminderText(e.target.value)}
+                />
+                {sessionReminderText && (
+                  <button
+                    type="button"
+                    className="danger-btn"
+                    onClick={() => setSessionReminderText('')}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                As soon as your current Pomodoro session reaches 00:00, an alert banner and chime will
+                remind you.
+              </span>
+            </div>
+
+            <div style={{ height: '1px', background: 'var(--glass-border)' }} />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                2. Calendar & Microsoft OneNote Integration:
+              </label>
+              <button type="button" onClick={handleGoogleCalendarSync}>
+                📅 Add Focus Block & Tasks to Google Calendar ↗
+              </button>
+              <button type="button" className="outline" onClick={handleDownloadIcsCalendar}>
+                📆 Export Session to Outlook / Apple Calendar (.ics)
+              </button>
+              <button type="button" className="outline" onClick={handleOneNoteSync}>
+                📓 Copy Formatted Checklist for Microsoft OneNote / Notion
+              </button>
+              {syncSuccessMsg && (
+                <div
+                  style={{
+                    color: '#4ade80',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    textAlign: 'center',
+                  }}
+                >
+                  {syncSuccessMsg}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: Product Showcase, Creator Branding & Pro Tier ($2.99/mo) */}
+      {showProModal && (
+        <div className="modal-backdrop" onClick={() => setShowProModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: '640px' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>⚡ Focus Arena — By {APP_CONFIG.OWNER_NAME}</h2>
+                <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: '2px' }}>
+                  Next-Gen 3D Gamified AI Productivity Workspace
+                </div>
+              </div>
+              <button
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowProModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="pricing-grid">
+              {/* Free Tier */}
+              <div className="pricing-card">
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                  STARTER WARRIOR
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900 }}>Free</div>
+                <ul
+                  style={{
+                    paddingLeft: '1.1rem',
+                    margin: '0.4rem 0',
+                    fontSize: '0.8rem',
+                    color: '#cbd5e1',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  <li>Pomodoro Focus & Break Timer</li>
+                  <li>+1,000 Power Task Gamification</li>
+                  <li>Starter 4K Themes & Personas</li>
+                  <li>Voice Dictation & Hover Task Copy</li>
+                </ul>
+                <button
+                  type="button"
+                  className="outline"
+                  style={{ marginTop: 'auto' }}
+                  onClick={() => setShowProModal(false)}
+                >
+                  Current Plan
+                </button>
+              </div>
+
+              {/* Pro Tier */}
+              <div className="pricing-card pro">
+                <div style={{ fontSize: '0.75rem', color: '#fde047', fontWeight: 800 }}>
+                  ⚡ LEGENDARY PRO TIER
+                </div>
+                <div style={{ fontSize: '1.75rem', fontWeight: 900 }}>
+                  $2.99 <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ month</span>
+                </div>
+                <ul
+                  style={{
+                    paddingLeft: '1.1rem',
+                    margin: '0.4rem 0',
+                    fontSize: '0.8rem',
+                    color: '#f8fafc',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                  }}
+                >
+                  <li>Unlimited Custom AI Theme Prompts</li>
+                  <li>All 4K Worlds (DBZ, TWD, Cyberpunk, Shinobi, RPG)</li>
+                  <li>Live Spotify & Apple Music Focus Dock</li>
+                  <li>Microsoft OneNote & Calendar Sync</li>
+                  <li>PRO Golden Badge & Priority Feature Access</li>
+                </ul>
+                <button
+                  type="button"
+                  style={{ marginTop: 'auto' }}
+                  onClick={() => {
+                    if (APP_CONFIG.PRO_CHECKOUT_URL) {
+                      window.open(APP_CONFIG.PRO_CHECKOUT_URL, '_blank', 'noopener,noreferrer');
+                    } else {
+                      const nextPro = !isProMember;
+                      setIsProMember(nextPro);
+                      localStorage.setItem('pomodoro-pro-member', String(nextPro));
+                    }
+                  }}
+                >
+                  {isProMember ? '✓ Pro Badge Active' : '🚀 Unlock Pro (Early Access)'}
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '0.85rem 1rem',
+                borderRadius: '12px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '8px',
+                fontSize: '0.8rem',
+              }}
+            >
+              <span>
+                Created & Engineered by <strong>{APP_CONFIG.OWNER_NAME}</strong>
+              </span>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <a
+                  href={APP_CONFIG.OWNER_LINKEDIN_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)', fontWeight: 700, textDecoration: 'none' }}
+                >
+                  Connect on LinkedIn ↗
+                </a>
+                <a
+                  href={APP_CONFIG.OWNER_GITHUB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)', fontWeight: 700, textDecoration: 'none' }}
+                >
+                  GitHub (@xakhundx) ↗
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       )}
