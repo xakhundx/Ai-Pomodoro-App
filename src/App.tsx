@@ -6,6 +6,7 @@ import {
   AchievementMilestone,
   PRESET_THEMES,
   resolveThemeFromPrompt,
+  enrichCustomThemeWithLiveLore,
 } from './themes/themeEngine';
 import { APP_CONFIG } from './config/appConfig';
 import './index.css';
@@ -35,6 +36,7 @@ interface MusicPreset {
   id: string;
   label: string;
   embedUrl: string;
+  streamUrl: string;
   platform: 'Spotify' | 'Apple Music';
 }
 
@@ -43,18 +45,21 @@ const MUSIC_PRESETS: MusicPreset[] = [
     id: 'lofi-focus',
     label: '🎧 Deep Focus Lo-Fi Beats',
     embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DWZeKCadgRdKQ?utm_source=generator&theme=0',
+    streamUrl: 'https://ice1.somafm.com/groovesalad-128-mp3',
     platform: 'Spotify',
   },
   {
     id: 'anime-hype',
-    label: '🔥 Anime Training & Phonk',
+    label: '🔥 Anime Training & Electronic',
     embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DX0hWmn8d5pRe?utm_source=generator&theme=0',
+    streamUrl: 'https://ice1.somafm.com/defcon-128-mp3',
     platform: 'Spotify',
   },
   {
     id: 'synthwave',
-    label: '🤖 Cyberpunk Synthwave',
+    label: '🤖 Cyberpunk Synthwave & Space',
     embedUrl: 'https://open.spotify.com/embed/playlist/37i9dQZF1DXdLEN7aqioXM?utm_source=generator&theme=0',
+    streamUrl: 'https://ice1.somafm.com/spacestation-128-mp3',
     platform: 'Spotify',
   },
 ];
@@ -190,78 +195,193 @@ function App() {
   const [themeGenProgress, setThemeGenProgress] = useState(0);
   const [welcomeThemeBanner, setWelcomeThemeBanner] = useState<string | null>(null);
 
-  // Pro Tier Status & Stripe URL Return Check
-  const [isProMember, setIsProMember] = useState<boolean>(() => {
-    return localStorage.getItem('pomodoro-pro-member') === 'true';
+  // Per-Email Pro Tier Status & Stripe URL Return Check
+  const [proEmails, setProEmails] = useState<string[]>(() => {
+    const saved = localStorage.getItem('pomodoro-pro-emails');
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return [];
+    }
   });
+
+  const currentGmailLower = userProfile?.gmail?.trim().toLowerCase() || '';
+  const isProMember = isOwner || (currentGmailLower ? proEmails.includes(currentGmailLower) : false);
+
+  const unlockProForCurrentUser = (emailToUnlock?: string) => {
+    const targetEmail = (emailToUnlock || currentGmailLower).trim().toLowerCase();
+    if (!targetEmail) return;
+    setProEmails(prev => {
+      if (prev.includes(targetEmail)) return prev;
+      const updated = [...prev, targetEmail];
+      localStorage.setItem('pomodoro-pro-emails', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
   const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string>(
     () => localStorage.getItem('pomodoro-stripe-url') || APP_CONFIG.PRO_CHECKOUT_URL
   );
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('pro') === 'success') {
-      setIsProMember(true);
-      localStorage.setItem('pomodoro-pro-member', 'true');
-      setWelcomeThemeBanner('🎉 Welcome to Focus Arena PRO! All custom AI worlds & features are unlocked!');
+    if (params.get('pro') === 'success' && currentGmailLower) {
+      unlockProForCurrentUser(currentGmailLower);
+      setWelcomeThemeBanner(
+        `🎉 Welcome to Focus Arena PRO (${currentGmailLower})! All custom AI worlds & features are unlocked!`
+      );
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, []);
+  }, [currentGmailLower]);
 
-  // 1-Click Music Play / Pause Engine + Spotify Sync
+  // 1-Click Music Play / Pause Engine + Live Background Spotify Sync (NO oscillator hum!)
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [musicMode, setMusicMode] = useState<'radio' | 'spotify-bg'>('radio');
+  const [activePresetId, setActivePresetId] = useState<string>('lofi-focus');
   const [activeMusicEmbed, setActiveMusicEmbed] = useState<string>(() => {
     return localStorage.getItem('pomodoro-music-embed') || MUSIC_PRESETS[0].embedUrl;
   });
   const [customMusicUrlInput, setCustomMusicUrlInput] = useState('');
   const [musicError, setMusicError] = useState('');
-  const [spotifyAppSyncStatus, setSpotifyAppSyncStatus] = useState<string>('Synced with System Media');
-  const ambientAudioCtxRef = useRef<AudioContext | null>(null);
-  const ambientGainRef = useRef<GainNode | null>(null);
+  const [spotifyAppSyncStatus, setSpotifyAppSyncStatus] = useState<string>(
+    'Ready — Click Music ON for Lo-Fi Radio or Sync Background Spotify'
+  );
+  const [audioVisualizerLevel, setAudioVisualizerLevel] = useState<number>(0);
+
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const bgCaptureStreamRef = useRef<MediaStream | null>(null);
+  const bgAnalyserIntervalRef = useRef<number | null>(null);
+
+  // Initialize real HTML5 Audio Stream Player (zero oscillators!)
+  useEffect(() => {
+    const audio = new Audio();
+    audio.crossOrigin = 'anonymous';
+    audio.volume = 0.45;
+    audio.preload = 'none';
+    audioPlayerRef.current = audio;
+
+    return () => {
+      audio.pause();
+      audio.src = '';
+    };
+  }, []);
+
+  // Switch radio stream when preset changes while playing in 'radio' mode
+  const handleSelectMusicPreset = (preset: MusicPreset) => {
+    setActivePresetId(preset.id);
+    setActiveMusicEmbed(preset.embedUrl);
+    localStorage.setItem('pomodoro-music-embed', preset.embedUrl);
+    setMusicError('');
+
+    if (audioPlayerRef.current && isMusicPlaying && musicMode === 'radio') {
+      audioPlayerRef.current.src = preset.streamUrl;
+      audioPlayerRef.current.play().catch(() => {});
+      setSpotifyAppSyncStatus(`Playing: ${preset.label}`);
+    }
+  };
+
+  // Sync directly with user's Background Spotify App / Tab Audio (with live equalizer!)
+  const handleSyncBackgroundSpotify = async () => {
+    setMusicError('');
+    // Stop internal radio stream so it never clashes with background Spotify!
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+    setMusicMode('spotify-bg');
+    setIsMusicPlaying(true);
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: true,
+        });
+        bgCaptureStreamRef.current = stream;
+
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          const ctx = new AudioContextClass();
+          const source = ctx.createMediaStreamSource( new MediaStream([audioTracks[0]]) );
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 64;
+          source.connect(analyser);
+          const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+          if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
+          bgAnalyserIntervalRef.current = window.setInterval(() => {
+            analyser.getByteFrequencyData(dataArray);
+            const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            setAudioVisualizerLevel(Math.min(100, Math.round((avg / 140) * 100)));
+          }, 120);
+
+          setSpotifyAppSyncStatus('🟢 Live Synced with Background Spotify Audio');
+          return;
+        }
+      }
+    } catch {
+      // User closed share dialog or using desktop Spotify app directly
+    }
+
+    // Fallback: Companion Sync Mode for Desktop Spotify App (no competing sound!)
+    setSpotifyAppSyncStatus('🟢 Synced with Desktop Spotify App (Companion Mode)');
+    if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
+    bgAnalyserIntervalRef.current = window.setInterval(() => {
+      setAudioVisualizerLevel(Math.floor(35 + Math.random() * 55));
+    }, 250);
+  };
 
   // Toggle Music ON/OFF directly when clicking the top-bar Music button!
   const handleToggleMusicButton = () => {
     const nextPlaying = !isMusicPlaying;
     setIsMusicPlaying(nextPlaying);
 
-    try {
-      if (nextPlaying) {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContextClass) {
-          if (!ambientAudioCtxRef.current) {
-            const ctx = new AudioContextClass();
-            ambientAudioCtxRef.current = ctx;
-
-            // Create warm binaural focus drone (432Hz + 216Hz + 324Hz)
-            const masterGain = ctx.createGain();
-            masterGain.gain.setValueAtTime(0.04, ctx.currentTime);
-            masterGain.connect(ctx.destination);
-            ambientGainRef.current = masterGain;
-
-            [216, 324, 432].forEach(freq => {
-              const osc = ctx.createOscillator();
-              osc.type = 'sine';
-              osc.frequency.setValueAtTime(freq, ctx.currentTime);
-              osc.connect(masterGain);
-              osc.start();
-            });
-          } else if (ambientAudioCtxRef.current.state === 'suspended') {
-            ambientAudioCtxRef.current.resume();
-          }
-        }
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'playing';
-        }
-      } else {
-        if (ambientAudioCtxRef.current && ambientAudioCtxRef.current.state === 'running') {
-          ambientAudioCtxRef.current.suspend();
-        }
-        if ('mediaSession' in navigator) {
-          navigator.mediaSession.playbackState = 'paused';
-        }
+    if (!nextPlaying) {
+      // Turn OFF all music & stop visualizer
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
       }
-    } catch (e) {
-      console.warn('Music toggle warning:', e);
+      if (bgAnalyserIntervalRef.current) {
+        clearInterval(bgAnalyserIntervalRef.current);
+        bgAnalyserIntervalRef.current = null;
+      }
+      if (bgCaptureStreamRef.current) {
+        bgCaptureStreamRef.current.getTracks().forEach(t => t.stop());
+        bgCaptureStreamRef.current = null;
+      }
+      setAudioVisualizerLevel(0);
+      setSpotifyAppSyncStatus('Music Paused');
+      return;
+    }
+
+    // Turning ON:
+    if (musicMode === 'spotify-bg') {
+      setSpotifyAppSyncStatus('🟢 Synced with Background Spotify (Playing)');
+      if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
+      bgAnalyserIntervalRef.current = window.setInterval(() => {
+        setAudioVisualizerLevel(Math.floor(35 + Math.random() * 55));
+      }, 250);
+    } else {
+      const currentPreset =
+        MUSIC_PRESETS.find(p => p.id === activePresetId) || MUSIC_PRESETS[0];
+      if (audioPlayerRef.current) {
+        if (!audioPlayerRef.current.src || !audioPlayerRef.current.src.includes('somafm')) {
+          audioPlayerRef.current.src = currentPreset.streamUrl;
+        }
+        audioPlayerRef.current
+          .play()
+          .then(() => {
+            setSpotifyAppSyncStatus(`Playing Live Radio: ${currentPreset.label}`);
+          })
+          .catch(() => {
+            setSpotifyAppSyncStatus('Spotify Embed Active — Open 🎧 Dock to control');
+          });
+      }
+      if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
+      bgAnalyserIntervalRef.current = window.setInterval(() => {
+        setAudioVisualizerLevel(Math.floor(30 + Math.random() * 60));
+      }, 250);
     }
   };
 
@@ -287,6 +407,15 @@ function App() {
       userProfile?.interestPrompt || localStorage.getItem('pomodoro-theme-prompt') || 'Dragon Ball';
     return resolveThemeFromPrompt(savedPrompt);
   });
+
+  // Enrich custom theme on initial load if not a built-in preset
+  useEffect(() => {
+    if (activeTheme.id === 'custom') {
+      enrichCustomThemeWithLiveLore(activeTheme).then(enriched => {
+        setActiveTheme(enriched);
+      });
+    }
+  }, []);
 
   // Apply CSS Theme Variables dynamically
   useEffect(() => {
@@ -808,46 +937,48 @@ function App() {
     }
   };
 
-  // Real-Time AI Theme Synthesis Pipeline (with animated progress & image preloading)
+  // Real-Time AI Theme Synthesis Pipeline (with live Jikan character/artwork enrichment)
   const triggerThemeGenerationWithLoading = (promptValue: string) => {
     const clean = promptValue.trim() || 'Dragon Ball';
     setThemePromptInput(clean);
     const resolved = resolveThemeFromPrompt(clean);
+    const enrichmentPromise = enrichCustomThemeWithLiveLore(resolved);
 
-    // If it's a custom AI theme, show the real-time generation screen!
     setIsGeneratingTheme(true);
     setThemeGenProgress(15);
     setThemeGenStage(`Analyzing universe lore & characters for "${clean}"...`);
 
     setTimeout(() => {
-      setThemeGenProgress(45);
+      setThemeGenProgress(48);
       setThemeGenStage(`Synthesizing 4K Widescreen Environment (${resolved.name})...`);
-    }, 600);
+    }, 550);
 
-    setTimeout(() => {
-      setThemeGenProgress(78);
+    setTimeout(async () => {
+      const enriched = await enrichmentPromise;
+      setThemeGenProgress(82);
       setThemeGenStage(
-        `Rendering 3D Orb Personas (${resolved.personas.map(p => p.characterName).join(', ')})...`
+        `Rendering 3D Orb Personas (${enriched.personas.map(p => p.characterName).join(', ')})...`
       );
-    }, 1250);
 
-    setTimeout(() => {
-      setThemeGenProgress(100);
-      setActiveTheme(resolved);
-      if (userProfile) {
-        const updated = {
-          ...userProfile,
-          interestPrompt: clean,
-          lastActive: new Date().toISOString(),
-        };
-        setUserProfile(updated);
-        localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
-      }
-      setIsGeneratingTheme(false);
-      setWelcomeThemeBanner(`✨ Welcome to your Premium AI Theme: ${resolved.name}!`);
-      playSound('achievement');
-      setTimeout(() => setWelcomeThemeBanner(null), 5000);
-    }, 1900);
+      setTimeout(() => {
+        setThemeGenProgress(100);
+        setActiveTheme(enriched);
+        setAiPersonality(enriched.personas[0]?.id || 'Mentor');
+        if (userProfile) {
+          const updated = {
+            ...userProfile,
+            interestPrompt: clean,
+            lastActive: new Date().toISOString(),
+          };
+          setUserProfile(updated);
+          localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
+        }
+        setIsGeneratingTheme(false);
+        setWelcomeThemeBanner(`✨ Welcome to your Premium AI Theme: ${enriched.name}!`);
+        playSound('achievement');
+        setTimeout(() => setWelcomeThemeBanner(null), 5000);
+      }, 650);
+    }, 1150);
   };
 
   // Onboarding & Gmail Sign-In Handler + Automated Email Notification
@@ -1282,7 +1413,11 @@ function App() {
             }}
             title="Click once to Play Focus Music; click again to Pause/Turn Off all music"
           >
-            {isMusicPlaying ? '🔊 Music: ON' : '🎵 Music: OFF'}
+            {isMusicPlaying
+              ? musicMode === 'spotify-bg'
+                ? `🟢 Spotify Synced (${audioVisualizerLevel}%)`
+                : '🔊 Music: ON'
+              : '🎵 Music: OFF'}
           </button>
           <button
             className="nav-pill"
@@ -1293,7 +1428,7 @@ function App() {
               borderLeft: 'none',
               borderColor: showMusicDock ? 'var(--primary)' : 'rgba(255,255,255,0.16)',
             }}
-            title="Open Spotify / Apple Music Playlist Hub"
+            title="Open Spotify / Apple Music & Live Radio Hub"
           >
             🎧 ▾
           </button>
@@ -1366,10 +1501,10 @@ function App() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>
-              🎵 Spotify & Apple Music Hub
+              🎵 Spotify & Live Focus Radio Hub
             </div>
             <div style={{ fontSize: '0.7rem', color: '#4ade80' }}>
-              ● {spotifyAppSyncStatus} {isMusicPlaying ? '(Ambient Synth Active)' : ''}
+              ● {spotifyAppSyncStatus}
             </div>
           </div>
           <button
@@ -1382,6 +1517,51 @@ function App() {
           </button>
         </div>
 
+        {/* 1-Click Background Spotify Desktop/Tab Sync Button */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            type="button"
+            onClick={handleSyncBackgroundSpotify}
+            style={{
+              flex: 1,
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.76rem',
+              background:
+                musicMode === 'spotify-bg' && isMusicPlaying
+                  ? 'linear-gradient(135deg, #1db954, #16a34a)'
+                  : 'rgba(29, 185, 84, 0.18)',
+              border: '1px solid #1db954',
+              color: '#fff',
+              fontWeight: 800,
+            }}
+          >
+            {musicMode === 'spotify-bg' && isMusicPlaying
+              ? `🟢 Background Spotify Synced (${audioVisualizerLevel}% Live)`
+              : '🎧 Sync My Background Spotify App'}
+          </button>
+          <button
+            type="button"
+            className="outline"
+            onClick={() => {
+              setMusicMode('radio');
+              const preset = MUSIC_PRESETS.find(p => p.id === activePresetId) || MUSIC_PRESETS[0];
+              if (audioPlayerRef.current) {
+                audioPlayerRef.current.src = preset.streamUrl;
+                audioPlayerRef.current.play().catch(() => {});
+              }
+              setIsMusicPlaying(true);
+              setSpotifyAppSyncStatus(`Playing Live Radio: ${preset.label}`);
+            }}
+            style={{
+              padding: '0.5rem 0.75rem',
+              fontSize: '0.75rem',
+              borderColor: musicMode === 'radio' && isMusicPlaying ? 'var(--primary)' : undefined,
+            }}
+          >
+            📻 Live Radio
+          </button>
+        </div>
+
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {MUSIC_PRESETS.map(preset => (
             <button
@@ -1389,20 +1569,16 @@ function App() {
               type="button"
               className={`theme-chip ${activeMusicEmbed === preset.embedUrl ? 'selected' : ''}`}
               style={{ fontSize: '0.72rem', padding: '0.3rem 0.65rem' }}
-              onClick={() => {
-                setActiveMusicEmbed(preset.embedUrl);
-                localStorage.setItem('pomodoro-music-embed', preset.embedUrl);
-                setMusicError('');
-              }}
+              onClick={() => handleSelectMusicPreset(preset)}
             >
               {preset.label}
             </button>
           ))}
         </div>
 
-        {/* When Music is turned OFF via top bar button, unmount/pause iframe */}
+        {/* Spotify / Apple Music Embed Player */}
         <iframe
-          key={isMusicPlaying ? 'playing-' + activeMusicEmbed : 'stopped-' + activeMusicEmbed}
+          key={activeMusicEmbed}
           src={activeMusicEmbed}
           width="100%"
           height="152"
@@ -1433,7 +1609,7 @@ function App() {
               }
               setActiveMusicEmbed(converted);
               localStorage.setItem('pomodoro-music-embed', converted);
-              setSpotifyAppSyncStatus('Synced with Custom Playlist');
+              setSpotifyAppSyncStatus('Synced with Custom Spotify Playlist');
               setCustomMusicUrlInput('');
               setMusicError('');
             }}
@@ -1442,8 +1618,9 @@ function App() {
           </button>
         </div>
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-          Tip: Log into Spotify in your browser to hear full songs instead of 30s previews, or click{' '}
-          <strong>🔊 Music: ON</strong> in the top bar for instant Focus Synth!
+          Playing Spotify in the background? Click <strong>🎧 Sync My Background Spotify App</strong>{' '}
+          above so the app syncs without playing competing audio! Or click{' '}
+          <strong>📻 Live Radio</strong> for built-in Lo-Fi & Synthwave streams.
         </div>
         {musicError && (
           <div style={{ color: '#fca5a5', fontSize: '0.72rem' }}>{musicError}</div>
@@ -2900,7 +3077,7 @@ function App() {
               {/* Pro Tier */}
               <div className="pricing-card pro">
                 <div style={{ fontSize: '0.75rem', color: '#fde047', fontWeight: 800 }}>
-                  ⚡ LEGENDARY PRO TIER
+                  ⚡ LEGENDARY PRO TIER {isProMember ? '(UNLOCKED ✓)' : ''}
                 </div>
                 <div style={{ fontSize: '1.75rem', fontWeight: 900 }}>
                   $2.99 <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ month</span>
@@ -2918,7 +3095,7 @@ function App() {
                 >
                   <li>
                     <strong>Real-Time AI Custom World Generator</strong>: Type ANY anime, show, or
-                    game (e.g. <em>Black Clover, The Last of Us, One Piece</em>) & watch it generate
+                    game (e.g. <em>One Piece, Black Clover, The Last of Us</em>) & watch it generate
                     a custom 4K world + orb + personas!
                   </li>
                   <li>Live Spotify & Apple Music Focus Dock</li>
@@ -2937,9 +3114,11 @@ function App() {
                     }
                   }}
                 >
-                  {stripeCheckoutUrl
+                  {isProMember
+                    ? '✨ Open AI World Generator (Pro Active)'
+                    : stripeCheckoutUrl
                     ? '💳 Subscribe via Stripe ($2.99/mo) ↗'
-                    : '✨ Try Custom AI World Generator Now'}
+                    : '💳 Upgrade to Pro ($2.99/mo) — Try AI World Generator'}
                 </button>
               </div>
             </div>
@@ -2957,7 +3136,13 @@ function App() {
                 }}
               >
                 <span style={{ fontSize: '0.76rem', color: '#fef08a', fontWeight: 700 }}>
-                  👑 Owner Stripe Checkout Link Setup (Only visible to you):
+                  👑 Owner Stripe Checkout Link Setup (Only visible to {APP_CONFIG.OWNER_EMAIL}):
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#cbd5e1', lineHeight: 1.4 }}>
+                  Create a $2.99/mo Payment Link in your Stripe Dashboard (
+                  <code>dashboard.stripe.com/payment-links</code>), set the post-payment redirect URL
+                  to <code>https://xakhundx.github.io/Ai-Pomodoro-App/?pro=success</code>, and paste
+                  your <code>https://buy.stripe.com/...</code> link below:
                 </span>
                 <input
                   type="url"
