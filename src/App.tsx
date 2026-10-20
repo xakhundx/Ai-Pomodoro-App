@@ -205,6 +205,7 @@ function App() {
       return [];
     }
   });
+  const [lockedThemeAttempt, setLockedThemeAttempt] = useState<AppTheme | null>(null);
 
   const currentGmailLower = userProfile?.gmail?.trim().toLowerCase() || '';
   const isProMember = isOwner || (currentGmailLower ? proEmails.includes(currentGmailLower) : false);
@@ -229,159 +230,91 @@ function App() {
     if (params.get('pro') === 'success' && currentGmailLower) {
       unlockProForCurrentUser(currentGmailLower);
       setWelcomeThemeBanner(
-        `🎉 Welcome to Focus Arena PRO (${currentGmailLower})! All custom AI worlds & features are unlocked!`
+        `🎉 Welcome to Focus Arena PRO (${currentGmailLower})! All 14+ 4K Worlds & Custom Themes are unlocked!`
       );
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [currentGmailLower]);
 
-  // 1-Click Music Play / Pause Engine + Live Background Spotify Sync (NO oscillator hum!)
+  // Official Spotify IFrame API Controller + 1-Click Music Play / Pause
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
-  const [musicMode, setMusicMode] = useState<'radio' | 'spotify-bg'>('radio');
-  const [activePresetId, setActivePresetId] = useState<string>('lofi-focus');
   const [activeMusicEmbed, setActiveMusicEmbed] = useState<string>(() => {
     return localStorage.getItem('pomodoro-music-embed') || MUSIC_PRESETS[0].embedUrl;
   });
   const [customMusicUrlInput, setCustomMusicUrlInput] = useState('');
   const [musicError, setMusicError] = useState('');
-  const [spotifyAppSyncStatus, setSpotifyAppSyncStatus] = useState<string>(
-    'Ready — Click Music ON for Lo-Fi Radio or Sync Background Spotify'
-  );
-  const [audioVisualizerLevel, setAudioVisualizerLevel] = useState<number>(0);
+  const spotifyEmbedContainerRef = useRef<HTMLDivElement | null>(null);
+  const spotifyControllerRef = useRef<any>(null);
 
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-  const bgCaptureStreamRef = useRef<MediaStream | null>(null);
-  const bgAnalyserIntervalRef = useRef<number | null>(null);
+  // Extract Spotify URI (e.g. spotify:playlist:37i9dQZF1DWZeKCadgRdKQ) from embed URL
+  const getSpotifyUriFromUrl = (url: string): string => {
+    const match = url.match(/spotify\.com\/(?:embed\/)?(playlist|track|album|artist|episode|show)\/([a-zA-Z0-9]+)/);
+    if (match) {
+      return `spotify:${match[1]}:${match[2]}`;
+    }
+    return 'spotify:playlist:37i9dQZF1DWZeKCadgRdKQ';
+  };
 
-  // Initialize real HTML5 Audio Stream Player (zero oscillators!)
+  // Load Official Spotify Embed IFrame API so top-bar button & Spotify widget stay in sync
   useEffect(() => {
-    const audio = new Audio();
-    audio.crossOrigin = 'anonymous';
-    audio.volume = 0.45;
-    audio.preload = 'none';
-    audioPlayerRef.current = audio;
+    const uri = getSpotifyUriFromUrl(activeMusicEmbed);
 
-    return () => {
-      audio.pause();
-      audio.src = '';
+    const initController = (IFrameAPI: any) => {
+      if (!spotifyEmbedContainerRef.current) return;
+      if (spotifyControllerRef.current && spotifyControllerRef.current.loadUri) {
+        spotifyControllerRef.current.loadUri(uri);
+        return;
+      }
+      IFrameAPI.createController(
+        spotifyEmbedContainerRef.current,
+        {
+          uri,
+          width: '100%',
+          height: 152,
+          theme: 'dark',
+        },
+        (EmbedController: any) => {
+          spotifyControllerRef.current = EmbedController;
+          EmbedController.addListener('playback_update', (e: any) => {
+            if (e && e.data && typeof e.data.isPaused === 'boolean') {
+              setIsMusicPlaying(!e.data.isPaused);
+            }
+          });
+        }
+      );
     };
-  }, []);
 
-  // Switch radio stream when preset changes while playing in 'radio' mode
+    if ((window as any).SpotifyIframeApi) {
+      initController((window as any).SpotifyIframeApi);
+    } else {
+      (window as any).onSpotifyIframeApiReady = (IFrameAPI: any) => {
+        (window as any).SpotifyIframeApi = IFrameAPI;
+        initController(IFrameAPI);
+      };
+      if (!document.getElementById('spotify-iframe-api-script')) {
+        const script = document.createElement('script');
+        script.id = 'spotify-iframe-api-script';
+        script.src = 'https://open.spotify.com/embed/iframe-api/v1';
+        script.async = true;
+        document.body.appendChild(script);
+      }
+    }
+  }, [activeMusicEmbed]);
+
   const handleSelectMusicPreset = (preset: MusicPreset) => {
-    setActivePresetId(preset.id);
     setActiveMusicEmbed(preset.embedUrl);
     localStorage.setItem('pomodoro-music-embed', preset.embedUrl);
     setMusicError('');
-
-    if (audioPlayerRef.current && isMusicPlaying && musicMode === 'radio') {
-      audioPlayerRef.current.src = preset.streamUrl;
-      audioPlayerRef.current.play().catch(() => {});
-      setSpotifyAppSyncStatus(`Playing: ${preset.label}`);
-    }
-  };
-
-  // Sync directly with user's Background Spotify App / Tab Audio (with live equalizer!)
-  const handleSyncBackgroundSpotify = async () => {
-    setMusicError('');
-    // Stop internal radio stream so it never clashes with background Spotify!
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-    }
-    setMusicMode('spotify-bg');
-    setIsMusicPlaying(true);
-
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: true,
-        });
-        bgCaptureStreamRef.current = stream;
-
-        const audioTracks = stream.getAudioTracks();
-        if (audioTracks.length > 0) {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-          const ctx = new AudioContextClass();
-          const source = ctx.createMediaStreamSource( new MediaStream([audioTracks[0]]) );
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 64;
-          source.connect(analyser);
-          const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-          if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
-          bgAnalyserIntervalRef.current = window.setInterval(() => {
-            analyser.getByteFrequencyData(dataArray);
-            const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-            setAudioVisualizerLevel(Math.min(100, Math.round((avg / 140) * 100)));
-          }, 120);
-
-          setSpotifyAppSyncStatus('🟢 Live Synced with Background Spotify Audio');
-          return;
-        }
-      }
-    } catch {
-      // User closed share dialog or using desktop Spotify app directly
-    }
-
-    // Fallback: Companion Sync Mode for Desktop Spotify App (no competing sound!)
-    setSpotifyAppSyncStatus('🟢 Synced with Desktop Spotify App (Companion Mode)');
-    if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
-    bgAnalyserIntervalRef.current = window.setInterval(() => {
-      setAudioVisualizerLevel(Math.floor(35 + Math.random() * 55));
-    }, 250);
   };
 
   // Toggle Music ON/OFF directly when clicking the top-bar Music button!
   const handleToggleMusicButton = () => {
-    const nextPlaying = !isMusicPlaying;
-    setIsMusicPlaying(nextPlaying);
-
-    if (!nextPlaying) {
-      // Turn OFF all music & stop visualizer
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-      }
-      if (bgAnalyserIntervalRef.current) {
-        clearInterval(bgAnalyserIntervalRef.current);
-        bgAnalyserIntervalRef.current = null;
-      }
-      if (bgCaptureStreamRef.current) {
-        bgCaptureStreamRef.current.getTracks().forEach(t => t.stop());
-        bgCaptureStreamRef.current = null;
-      }
-      setAudioVisualizerLevel(0);
-      setSpotifyAppSyncStatus('Music Paused');
-      return;
-    }
-
-    // Turning ON:
-    if (musicMode === 'spotify-bg') {
-      setSpotifyAppSyncStatus('🟢 Synced with Background Spotify (Playing)');
-      if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
-      bgAnalyserIntervalRef.current = window.setInterval(() => {
-        setAudioVisualizerLevel(Math.floor(35 + Math.random() * 55));
-      }, 250);
+    if (spotifyControllerRef.current && spotifyControllerRef.current.togglePlay) {
+      spotifyControllerRef.current.togglePlay();
+      setIsMusicPlaying(prev => !prev);
     } else {
-      const currentPreset =
-        MUSIC_PRESETS.find(p => p.id === activePresetId) || MUSIC_PRESETS[0];
-      if (audioPlayerRef.current) {
-        if (!audioPlayerRef.current.src || !audioPlayerRef.current.src.includes('somafm')) {
-          audioPlayerRef.current.src = currentPreset.streamUrl;
-        }
-        audioPlayerRef.current
-          .play()
-          .then(() => {
-            setSpotifyAppSyncStatus(`Playing Live Radio: ${currentPreset.label}`);
-          })
-          .catch(() => {
-            setSpotifyAppSyncStatus('Spotify Embed Active — Open 🎧 Dock to control');
-          });
-      }
-      if (bgAnalyserIntervalRef.current) clearInterval(bgAnalyserIntervalRef.current);
-      bgAnalyserIntervalRef.current = window.setInterval(() => {
-        setAudioVisualizerLevel(Math.floor(30 + Math.random() * 60));
-      }, 250);
+      setIsMusicPlaying(prev => !prev);
+      setShowMusicDock(true);
     }
   };
 
@@ -401,21 +334,24 @@ function App() {
     () => localStorage.getItem('pomodoro-webhook-url') || APP_CONFIG.USER_TRACKING_WEBHOOK_URL
   );
 
-  // Theme State
+  // Theme State (Free Tier defaults to Dragon Ball; Pro/Owner unlocks all 14+ 4K worlds)
   const [activeTheme, setActiveTheme] = useState<AppTheme>(() => {
     const savedPrompt =
       userProfile?.interestPrompt || localStorage.getItem('pomodoro-theme-prompt') || 'Dragon Ball';
-    return resolveThemeFromPrompt(savedPrompt);
+    const resolved = resolveThemeFromPrompt(savedPrompt);
+    if (!isProMember && !isOwner && resolved.id !== 'dragonball') {
+      return PRESET_THEMES.dragonball;
+    }
+    return resolved;
   });
 
-  // Enrich custom theme on initial load if not a built-in preset
+  // Ensure switching to a non-Pro email resets theme back to Free Tier Dragon Ball
   useEffect(() => {
-    if (activeTheme.id === 'custom') {
-      enrichCustomThemeWithLiveLore(activeTheme).then(enriched => {
-        setActiveTheme(enriched);
-      });
+    if (!isProMember && !isOwner && activeTheme.id !== 'dragonball') {
+      setActiveTheme(PRESET_THEMES.dragonball);
+      setAiPersonality(PRESET_THEMES.dragonball.personas[0].id);
     }
-  }, []);
+  }, [isProMember, isOwner]);
 
   // Apply CSS Theme Variables dynamically
   useEffect(() => {
@@ -937,33 +873,46 @@ function App() {
     }
   };
 
-  // Real-Time AI Theme Synthesis Pipeline (with live Jikan character/artwork enrichment)
-  const triggerThemeGenerationWithLoading = (promptValue: string) => {
+  // Pre-Built 4K World Synthesis Pipeline (Free Tier = Dragon Ball; Pro Tier = All 14+ 4K Worlds)
+  const triggerThemeGenerationWithLoading = (promptValue: string, overrideGmail?: string) => {
     const clean = promptValue.trim() || 'Dragon Ball';
     setThemePromptInput(clean);
     const resolved = resolveThemeFromPrompt(clean);
-    const enrichmentPromise = enrichCustomThemeWithLiveLore(resolved);
 
+    const checkEmail = (overrideGmail ?? currentGmailLower).trim().toLowerCase();
+    const hasProAccess =
+      checkEmail === APP_CONFIG.OWNER_EMAIL.toLowerCase() ||
+      (checkEmail ? proEmails.includes(checkEmail) : false);
+
+    // Free Tier Gate: Only Dragon Ball is included in Free Tier; all other 4K worlds require Pro ($2.99/mo)
+    if (resolved.id !== 'dragonball' && !hasProAccess) {
+      setActiveTheme(PRESET_THEMES.dragonball);
+      setAiPersonality(PRESET_THEMES.dragonball.personas[0].id);
+      setLockedThemeAttempt(resolved);
+      setShowProModal(true);
+      return;
+    }
+
+    setLockedThemeAttempt(null);
     setIsGeneratingTheme(true);
-    setThemeGenProgress(15);
+    setThemeGenProgress(18);
     setThemeGenStage(`Analyzing universe lore & characters for "${clean}"...`);
 
     setTimeout(() => {
-      setThemeGenProgress(48);
+      setThemeGenProgress(54);
       setThemeGenStage(`Synthesizing 4K Widescreen Environment (${resolved.name})...`);
-    }, 550);
+    }, 520);
 
-    setTimeout(async () => {
-      const enriched = await enrichmentPromise;
-      setThemeGenProgress(82);
+    setTimeout(() => {
+      setThemeGenProgress(86);
       setThemeGenStage(
-        `Rendering 3D Orb Personas (${enriched.personas.map(p => p.characterName).join(', ')})...`
+        `Rendering 3D Orb Personas (${resolved.personas.map(p => p.characterName).join(', ')})...`
       );
 
       setTimeout(() => {
         setThemeGenProgress(100);
-        setActiveTheme(enriched);
-        setAiPersonality(enriched.personas[0]?.id || 'Mentor');
+        setActiveTheme(resolved);
+        setAiPersonality(resolved.personas[0]?.id || 'Mentor');
         if (userProfile) {
           const updated = {
             ...userProfile,
@@ -974,11 +923,11 @@ function App() {
           localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
         }
         setIsGeneratingTheme(false);
-        setWelcomeThemeBanner(`✨ Welcome to your Premium AI Theme: ${enriched.name}!`);
+        setWelcomeThemeBanner(`✨ Welcome to your 4K World: ${resolved.name}!`);
         playSound('achievement');
         setTimeout(() => setWelcomeThemeBanner(null), 5000);
-      }, 650);
-    }, 1150);
+      }, 600);
+    }, 1050);
   };
 
   // Onboarding & Gmail Sign-In Handler + Automated Email Notification
@@ -1046,7 +995,7 @@ function App() {
 
     setOnboardingError('');
     setShowOnboardingModal(false);
-    triggerThemeGenerationWithLoading(cleanPrompt);
+    triggerThemeGenerationWithLoading(cleanPrompt, cleanGmail);
   };
 
   // Submit Instant 5-Star In-App Feedback
@@ -1411,13 +1360,9 @@ function App() {
               borderColor: isMusicPlaying ? '#22c55e' : 'rgba(255,255,255,0.16)',
               background: isMusicPlaying ? 'rgba(34, 197, 94, 0.22)' : 'rgba(255,255,255,0.06)',
             }}
-            title="Click once to Play Focus Music; click again to Pause/Turn Off all music"
+            title="Click once to Play Spotify Music; click again to Pause"
           >
-            {isMusicPlaying
-              ? musicMode === 'spotify-bg'
-                ? `🟢 Spotify Synced (${audioVisualizerLevel}%)`
-                : '🔊 Music: ON'
-              : '🎵 Music: OFF'}
+            {isMusicPlaying ? '🔊 Music: ON' : '🎵 Music: OFF'}
           </button>
           <button
             className="nav-pill"
@@ -1428,7 +1373,7 @@ function App() {
               borderLeft: 'none',
               borderColor: showMusicDock ? 'var(--primary)' : 'rgba(255,255,255,0.16)',
             }}
-            title="Open Spotify / Apple Music & Live Radio Hub"
+            title="Open Spotify & Apple Music Playlist Hub"
           >
             🎧 ▾
           </button>
@@ -1456,7 +1401,7 @@ function App() {
             background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.28), rgba(59, 130, 246, 0.25))',
             borderColor: '#facc15',
           }}
-          title="Explore Focus Arena Pro ($2.99/mo) & Custom AI Worlds"
+          title="Explore Focus Arena Pro ($2.99/mo) & All 14+ 4K Worlds"
         >
           💎 Pro
         </button>
@@ -1501,10 +1446,10 @@ function App() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>
-              🎵 Spotify & Live Focus Radio Hub
+              🎵 Spotify & Apple Music Focus Hub
             </div>
-            <div style={{ fontSize: '0.7rem', color: '#4ade80' }}>
-              ● {spotifyAppSyncStatus}
+            <div style={{ fontSize: '0.7rem', color: isMusicPlaying ? '#4ade80' : 'var(--text-muted)' }}>
+              {isMusicPlaying ? '● Spotify Player Active (Playing)' : '● Paused — Click Music: ON or Play below'}
             </div>
           </div>
           <button
@@ -1514,51 +1459,6 @@ function App() {
             onClick={() => setShowMusicDock(false)}
           >
             Done ▾
-          </button>
-        </div>
-
-        {/* 1-Click Background Spotify Desktop/Tab Sync Button */}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button
-            type="button"
-            onClick={handleSyncBackgroundSpotify}
-            style={{
-              flex: 1,
-              padding: '0.5rem 0.75rem',
-              fontSize: '0.76rem',
-              background:
-                musicMode === 'spotify-bg' && isMusicPlaying
-                  ? 'linear-gradient(135deg, #1db954, #16a34a)'
-                  : 'rgba(29, 185, 84, 0.18)',
-              border: '1px solid #1db954',
-              color: '#fff',
-              fontWeight: 800,
-            }}
-          >
-            {musicMode === 'spotify-bg' && isMusicPlaying
-              ? `🟢 Background Spotify Synced (${audioVisualizerLevel}% Live)`
-              : '🎧 Sync My Background Spotify App'}
-          </button>
-          <button
-            type="button"
-            className="outline"
-            onClick={() => {
-              setMusicMode('radio');
-              const preset = MUSIC_PRESETS.find(p => p.id === activePresetId) || MUSIC_PRESETS[0];
-              if (audioPlayerRef.current) {
-                audioPlayerRef.current.src = preset.streamUrl;
-                audioPlayerRef.current.play().catch(() => {});
-              }
-              setIsMusicPlaying(true);
-              setSpotifyAppSyncStatus(`Playing Live Radio: ${preset.label}`);
-            }}
-            style={{
-              padding: '0.5rem 0.75rem',
-              fontSize: '0.75rem',
-              borderColor: musicMode === 'radio' && isMusicPlaying ? 'var(--primary)' : undefined,
-            }}
-          >
-            📻 Live Radio
           </button>
         </div>
 
@@ -1576,24 +1476,23 @@ function App() {
           ))}
         </div>
 
-        {/* Spotify / Apple Music Embed Player */}
-        <iframe
-          key={activeMusicEmbed}
-          src={activeMusicEmbed}
-          width="100%"
-          height="152"
-          frameBorder="0"
-          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-          loading="lazy"
-          style={{ borderRadius: '12px' }}
-          title="Focus Arena Music Player"
-        />
+        {/* Official Spotify IFrame API Interactive Player */}
+        <div
+          style={{
+            borderRadius: '12px',
+            overflow: 'hidden',
+            minHeight: '152px',
+            background: 'rgba(0,0,0,0.35)',
+          }}
+        >
+          <div ref={spotifyEmbedContainerRef} />
+        </div>
 
         <div style={{ display: 'flex', gap: '6px' }}>
           <input
             type="url"
             className="input-field"
-            placeholder="Paste Spotify or Apple Music playlist/song link..."
+            placeholder="Paste your Spotify playlist or song link..."
             value={customMusicUrlInput}
             onChange={e => setCustomMusicUrlInput(e.target.value)}
             style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem' }}
@@ -1609,18 +1508,29 @@ function App() {
               }
               setActiveMusicEmbed(converted);
               localStorage.setItem('pomodoro-music-embed', converted);
-              setSpotifyAppSyncStatus('Synced with Custom Spotify Playlist');
               setCustomMusicUrlInput('');
               setMusicError('');
             }}
           >
-            Sync
+            Load
           </button>
         </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-          Playing Spotify in the background? Click <strong>🎧 Sync My Background Spotify App</strong>{' '}
-          above so the app syncs without playing competing audio! Or click{' '}
-          <strong>📻 Live Radio</strong> for built-in Lo-Fi & Synthwave streams.
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+            Synced with top-bar <strong>🔊 Music: ON / OFF</strong> button
+          </span>
+          <a
+            href={getSpotifyUriFromUrl(activeMusicEmbed)}
+            style={{
+              fontSize: '0.72rem',
+              color: '#1db954',
+              fontWeight: 800,
+              textDecoration: 'none',
+            }}
+          >
+            🎧 Open in Spotify App ↗
+          </a>
         </div>
         {musicError && (
           <div style={{ color: '#fca5a5', fontSize: '0.72rem' }}>{musicError}</div>
@@ -2448,11 +2358,17 @@ function App() {
               </button>
             </div>
 
-            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1' }}>
-              Instant 4K Worlds:
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Instant 4K Worlds ({Object.keys(PRESET_THEMES).length} Pre-Built Universes):</span>
+              <span style={{ fontSize: '0.72rem', color: isProMember || isOwner ? '#4ade80' : '#fbbf24' }}>
+                {isProMember || isOwner ? '💎 Pro Unlocked: All Worlds Active' : '🆓 Free Tier: Dragon Ball Free • Pro ($2.99/mo) unlocks all'}
+              </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {Object.values(PRESET_THEMES).map(preset => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+              {Object.values(PRESET_THEMES).map(preset => {
+                const isFreeTheme = preset.id === 'dragonball';
+                const isLockedForUser = !isFreeTheme && !isProMember && !isOwner;
+                return (
                 <div
                   key={preset.id}
                   onClick={() => {
@@ -2474,11 +2390,25 @@ function App() {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    opacity: isLockedForUser ? 0.88 : 1,
                   }}
                 >
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>
-                      {preset.badge} — {preset.name}
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span>{preset.badge} — {preset.name}</span>
+                      {isFreeTheme ? (
+                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(34,197,94,0.2)', border: '1px solid #4ade80', color: '#86efac', fontWeight: 800 }}>
+                          FREE TIER
+                        </span>
+                      ) : isLockedForUser ? (
+                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(251,191,36,0.2)', border: '1px solid #fbbf24', color: '#fde047', fontWeight: 800 }}>
+                          🔒 PRO $2.99
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(56,189,248,0.18)', border: '1px solid #38bdf8', color: '#bae6fd', fontWeight: 800 }}>
+                          💎 PRO UNLOCKED
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                       Orb & Personas: {preset.personas.map(p => p.characterName).join(' • ')}
@@ -2486,18 +2416,20 @@ function App() {
                   </div>
                   <div
                     style={{
-                      width: '28px',
-                      height: '28px',
+                      width: '34px',
+                      height: '34px',
                       borderRadius: '50%',
                       background: preset.orbImageUrl
                         ? `url(${preset.orbImageUrl}) center/cover`
                         : `linear-gradient(135deg, ${preset.primary}, ${preset.secondary})`,
                       boxShadow: `0 0 12px ${preset.primary}`,
                       border: `1px solid ${preset.primary}`,
+                      flexShrink: 0,
                     }}
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -3041,6 +2973,37 @@ function App() {
               </button>
             </div>
 
+            {lockedThemeAttempt && !isProMember && !isOwner && (
+              <div
+                style={{
+                  padding: '0.85rem 1rem',
+                  borderRadius: '12px',
+                  background: 'rgba(251, 191, 36, 0.14)',
+                  border: '1px solid rgba(251, 191, 36, 0.5)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 800, color: '#fde047', fontSize: '0.9rem' }}>
+                    🔒 &ldquo;{lockedThemeAttempt}&rdquo; is a Focus Arena Pro World!
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: '#e2e8f0', marginTop: '2px' }}>
+                    Free Tier includes the Dragon Ball Super 4K World. Upgrade to Pro ($2.99/mo) to unlock all 14+ 4K Anime, Gaming & Cinema Worlds!
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  style={{ padding: '4px 10px', fontSize: '0.72rem', flexShrink: 0 }}
+                  onClick={() => setLockedThemeAttempt(null)}
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
             <div className="pricing-grid">
               {/* Free Tier */}
               <div className="pricing-card">
@@ -3061,7 +3024,9 @@ function App() {
                 >
                   <li>Pomodoro Focus & Break Timer (Min/Sec)</li>
                   <li>+1,000 Power Task Gamification</li>
-                  <li>5 Built-In 4K Worlds (DBZ, TWD, Cyberpunk, Naruto, Elden Ring)</li>
+                  <li>
+                    <strong>1 Free 4K World</strong>: Dragon Ball Super (Tournament of Power + Goku & Vegeta Orb)
+                  </li>
                   <li>Voice Dictation & Hover Task Copy</li>
                 </ul>
                 <button
@@ -3094,11 +3059,12 @@ function App() {
                   }}
                 >
                   <li>
-                    <strong>Real-Time AI Custom World Generator</strong>: Type ANY anime, show, or
-                    game (e.g. <em>One Piece, Black Clover, The Last of Us</em>) & watch it generate
-                    a custom 4K world + orb + personas!
+                    <strong>All 14+ Pre-Built 4K Worlds & AI Prompt Bar</strong>: Instant 4K custom
+                    backgrounds, 3D character orbs & personas for <em>Solo Leveling, Demon Slayer,
+                    Jujutsu Kaisen, One Piece, F1 Racing, The Avengers, The Last of Us, Attack on
+                    Titan, The Walking Dead, Cyberpunk, Naruto, Black Clover, Elden Ring</em> & more!
                   </li>
-                  <li>Live Spotify & Apple Music Focus Dock</li>
+                  <li>Interactive Spotify & Apple Music Focus Dock</li>
                   <li>Microsoft OneNote & Calendar (.ics / Google) Sync</li>
                   <li>PRO Golden Badge & Priority Feature Access</li>
                 </ul>
@@ -3115,10 +3081,10 @@ function App() {
                   }}
                 >
                   {isProMember
-                    ? '✨ Open AI World Generator (Pro Active)'
+                    ? '✨ Open 4K World Selector (Pro Active)'
                     : stripeCheckoutUrl
                     ? '💳 Subscribe via Stripe ($2.99/mo) ↗'
-                    : '💳 Upgrade to Pro ($2.99/mo) — Try AI World Generator'}
+                    : '💳 Upgrade to Pro ($2.99/mo) — Unlock All 14+ Worlds'}
                 </button>
               </div>
             </div>
