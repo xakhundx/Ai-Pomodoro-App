@@ -2328,14 +2328,10 @@ function App() {
               </button>
             </div>
             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Type <strong>any</strong> anime, show, game, faith, or national theme below (e.g.,{' '}
-              <strong>Solo Leveling</strong>, <strong>Demon Slayer</strong>,{' '}
-              <strong>Jujutsu Kaisen</strong>, <strong>The Last of Us</strong>,{' '}
-              <strong>Hajime no Ippo</strong>, <strong>Dandadan</strong>,{' '}
-              <strong>Star Wars Mandalorian</strong>, <strong>Islamic / Makkah</strong>,{' '}
-              <strong>Canada</strong>, <strong>Pakistan</strong>, <strong>India</strong>,{' '}
-              <strong>Bangladesh</strong>) to generate a custom 4K environment, 3D orb, and
-              character personas in real time!
+              Type <strong>any</strong> anime, show, game, or interest below (e.g.,{' '}
+              <strong>Black Clover</strong>, <strong>The Last of Us</strong>,{' '}
+              <strong>Solo Leveling</strong>, <strong>One Piece</strong>) to generate a custom 4K
+              environment, 3D orb, and character personas in real time!
             </p>
 
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -3063,12 +3059,10 @@ function App() {
                   }}
                 >
                   <li>
-                    <strong>All 22+ Pre-Built 4K Worlds & AI Prompt Bar</strong>: Instant 4K custom
+                    <strong>All 14+ Pre-Built 4K Worlds & AI Prompt Bar</strong>: Instant 4K custom
                     backgrounds, 3D character orbs & personas for <em>Solo Leveling, Demon Slayer,
-                    Jujutsu Kaisen, One Piece, Black Clover, The Last of Us, The Walking Dead,
-                    Attack on Titan, Hajime no Ippo, Dandadan, Star Wars (Mandalorian & Grogu),
-                    F1 Racing, The Avengers, Cyberpunk, Naruto, Elden Ring, Islamic (Makkah &
-                    Ramadan), Canada, India, Pakistan, Bangladesh</em> & more!
+                    Jujutsu Kaisen, One Piece, F1 Racing, The Avengers, The Last of Us, Attack on
+                    Titan, The Walking Dead, Cyberpunk, Naruto, Black Clover, Elden Ring</em> & more!
                   </li>
                   <li>Interactive Spotify & Apple Music Focus Dock</li>
                   <li>Microsoft OneNote & Calendar (.ics / Google) Sync</li>
