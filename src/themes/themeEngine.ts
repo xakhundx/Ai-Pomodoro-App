@@ -26,6 +26,22 @@ import f1Bg from '../assets/f1_bg.jpg';
 import f1Orb from '../assets/f1_orb.jpg';
 import aotBg from '../assets/aot_bg.jpg';
 import aotOrb from '../assets/aot_orb.jpg';
+import ippoBg from '../assets/ippo_bg.jpg';
+import ippoOrb from '../assets/ippo_orb.jpg';
+import dandadanBg from '../assets/dandadan_bg.jpg';
+import dandadanOrb from '../assets/dandadan_orb.jpg';
+import starwarsBg from '../assets/starwars_bg.jpg';
+import starwarsOrb from '../assets/starwars_orb.jpg';
+import islamicBg from '../assets/islamic_bg.jpg';
+import islamicOrb from '../assets/islamic_orb.jpg';
+import canadaBg from '../assets/canada_bg.jpg';
+import canadaOrb from '../assets/canada_orb.jpg';
+import indiaBg from '../assets/india_bg.jpg';
+import indiaOrb from '../assets/india_orb.jpg';
+import pakistanBg from '../assets/pakistan_bg.jpg';
+import pakistanOrb from '../assets/pakistan_orb.jpg';
+import bangladeshBg from '../assets/bangladesh_bg.jpg';
+import bangladeshOrb from '../assets/bangladesh_orb.jpg';
 
 export interface PersonaOption {
   id: string;
@@ -290,18 +306,18 @@ export const PRESET_THEMES: Record<string, AppTheme> = {
       },
       {
         id: 'Mentor',
-        label: 'Kyojuro Rengoku & Giyu (Hashira)',
-        characterName: 'Rengoku & Giyu (Hashira)',
-        systemPrompt: '[You are Flame Hashira Kyojuro Rengoku and Water Hashira Giyu Tomioka from Demon Slayer. Passionate ("Set your heart ablaze!") combined with calm Hashira mastery.]',
-        greeting: (name) => `SET YOUR HEART ABLAZE, ${name}! The Hashira stand with you—let's turn your task list to ashes!`,
+        label: 'Kyojuro Rengoku & New Hashiras',
+        characterName: 'Rengoku, Tengen, Muichiro, Mitsuri & Giyu',
+        systemPrompt: '[You are Flame Hashira Kyojuro Rengoku alongside the Hashira (Tengen Uzui, Muichiro Tokito, Mitsuri Kanroji, Giyu Tomioka) from Demon Slayer. Passionate ("Set your heart ablaze!") combined with flashy and calm Hashira mastery.]',
+        greeting: (name) => `SET YOUR HEART ABLAZE, ${name}! Rengoku, Tengen, Muichiro, Mitsuri, and Giyu stand with you—let's turn your task list to ashes!`,
         taskCompleteQuotes: [
-          'UMAI!! Magnificent strike! +1,000 Breathing Power!',
-          'Eleventh Form: Dead Calm. That task was handled effortlessly.',
+          'UMAI!! Magnificent Flame Breathing strike! +1,000 Breathing Power!',
+          'Flashy execution! Tengen, Muichiro, and Giyu salute your Hashira speed!',
           'Your spirit burns brighter with every completed objective!'
         ],
         workFocusQuotes: [
           'Set your heart ablaze, grit your teeth, and charge straight through your next task!',
-          'Become as calm as still water and cut through distractions!'
+          'Activate your Demon Slayer Mark alongside the Hashira and cut through distractions!'
         ],
         breakQuotes: [
           'Enjoy a good bento box and catch your breath, young Hashira!'
@@ -310,23 +326,23 @@ export const PRESET_THEMES: Record<string, AppTheme> = {
       },
       {
         id: 'Rival',
-        label: 'Muzan Kibutsuji (Infinity Castle)',
-        characterName: 'Muzan Kibutsuji',
-        systemPrompt: '[You are Muzan Kibutsuji, King of Demons in the Infinity Castle. Intimidating, perfectionist, demanding absolute flawlessness from the user.]',
-        greeting: (name) => `Welcome to the Infinity Castle, ${name}. I tolerate zero weakness—prove your worth by clearing every task without hesitation.`,
+        label: 'Akaza & Muzan (Upper Moon Clash)',
+        characterName: 'Akaza & Muzan',
+        systemPrompt: '[You are Upper Moon Three Akaza ("Become a demon, Kyojuro! Destructive Death: Compass Needle!") and Muzan Kibutsuji in the Infinity Castle. Fierce martial arts rival demanding supreme fighting spirit.]',
+        greeting: (name) => `Technique Development: Destructive Death — Compass Needle! Show me your fighting spirit in the Infinity Castle, ${name}, and crush every task!`,
         taskCompleteQuotes: [
-          'Acceptable. +1,000 Power. Now proceed to the next objective immediately.',
-          'A sharp, merciless execution. Perhaps you are worthy of Upper Rank status.',
-          'Do not celebrate yet—there are still tasks remaining in my castle.'
+          'Destructive Death: Annihilation Type! That task was obliterated! +1,000 Power!',
+          'Magnificent fighting spirit! Your focus is reaching the realm of Highest Supremacy!',
+          'Do not stop now—there are more battles awaiting inside the Infinity Castle!'
         ],
         workFocusQuotes: [
-          'Eliminate that task immediately with absolute perfection.',
+          'Deploy your Compass Needle and lock onto your #1 task with supreme martial focus.',
           'Show me the focus of an Upper Rank and leave no task unfinished.'
         ],
         breakQuotes: [
-          'Regenerate your strength quickly. The night is far from over.'
+          'Regenerate your strength quickly. The clash is far from over.'
         ],
-        over9000Quote: (name) => `9,000 Power... Extraordinary, ${name}. Even within the Infinity Castle, your focus is unmatched!`
+        over9000Quote: (name) => `9,000 Power... Extraordinary fighting spirit, ${name}! Even Akaza and Muzan acknowledge your supreme mastery!`
       }
     ],
     milestones: [
@@ -755,23 +771,23 @@ export const PRESET_THEMES: Record<string, AppTheme> = {
       },
       {
         id: 'Optimist',
-        label: 'Carol Peletier (Survivor)',
-        characterName: 'Carol Peletier',
-        systemPrompt: '[You are Carol Peletier from The Walking Dead. Warm, fierce, resourceful survivor who encourages the user.]',
-        greeting: (name) => `You're stronger than you know, ${name}. Together we can turn this chaos into a thriving community. Ready to start?`,
+        label: 'Carol, Maggie & Negan (Lucille)',
+        characterName: 'Carol, Maggie, Carl & Negan',
+        systemPrompt: '[You are Carol Peletier, Maggie Rhee, Carl Grimes, and Negan (with his barbed-wire bat Lucille) from AMC\'s The Walking Dead. Gritty, realistic, sharp-witted apocalypse survivors.]',
+        greeting: (name) => `Easy peasy lemon squeezy, ${name}! Lucille is thirsty and Carol, Maggie, and Carl have the perimeter locked down—let's bash through this task list!`,
         taskCompleteQuotes: [
-          'Look at you go! Another task handled with pure resilience!',
-          'Every step forward builds a safer tomorrow. Proud of you!',
+          'Lucille just knocked that task out of the park! +1,000 Survival Power!',
+          'Every step forward builds a safer tomorrow for Alexandria and Hilltop!',
           'You made that look easy. What\'s next on our supply list?'
         ],
         workFocusQuotes: [
-          'Focus on what we can control right now—one task at a time.',
+          'Focus on what we can control right now—swing Lucille at your #1 task!',
           'We survive by staying smart and prepared. Let\'s knock this out!'
         ],
         breakQuotes: [
           'Come sit inside the safe zone and catch your breath for a bit.'
         ],
-        over9000Quote: (name) => `9,000 Survival Power, ${name}! You've become an unstoppable survivor!`
+        over9000Quote: (name) => `HOT DIGGITY DOG!! 9,000 Survival Power, ${name}! Even Negan and Lucille bow to your apocalypse leadership!`
       }
     ],
     milestones: [
@@ -1315,6 +1331,718 @@ export const PRESET_THEMES: Record<string, AppTheme> = {
       { threshold: 9000, id: 'rpg-9k', title: 'OVER 9,000: ELDEN LORD OF FOCUS!', subtitle: '9,000 Rune Power Unlocked — Sovereign of Productivity!', icon: '⚔️', isMajor: true },
       { threshold: 15000, id: 'rpg-15k', title: 'Age of the Stars', subtitle: '15,000 Rune Power — Ascended Mythic Legend!', icon: '🌟', isMajor: true },
     ]
+  },
+
+  ippo: {
+    id: 'ippo',
+    name: 'Hajime no Ippo (Kamogawa Boxing)',
+    badge: '🥊 Dempsey Roll',
+    interestPrompt: 'Hajime no Ippo',
+    isProCustom: true,
+    bgImageUrl: ippoBg,
+    orbImageUrl: ippoOrb,
+    primary: '#ef4444',
+    primaryGlow: 'rgba(239, 68, 68, 0.7)',
+    secondary: '#facc15',
+    accent: '#fb923c',
+    bgOverlay: 'rgba(10, 12, 22, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #7f1d1d 0%, #1e1b4b 55%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#dc2626',
+    particleColor: '#facc15',
+    powerLabel: 'FIGHTING SPIRIT',
+    personas: [
+      {
+        id: 'Optimist',
+        label: 'Ippo Makunouchi (Dempsey Roll)',
+        characterName: 'Ippo Makunouchi',
+        systemPrompt: '[You are Ippo Makunouchi from Hajime no Ippo. Humble, hardworking featherweight champion who weaves in close with Gazelle Punch, Liver Blow, and the Dempsey Roll.]',
+        greeting: (name) => `Gloves laced up, ${name}! Coach Kamogawa says daily roadwork and focus win championships—let's unleash the Dempsey Roll on this task list!`,
+        taskCompleteQuotes: [
+          'DEMPSEY ROLL!! Jet-engine hooks knocked that task right out of the ring! +1,000 Spirit!',
+          'Gazelle Punch into Liver Blow! Another round won cleanly!',
+          'We learned what it means to be strong on that task! Onto the next round!'
+        ],
+        workFocusQuotes: [
+          'Tuck your chin, step inside, and weave straight into your #1 priority task!',
+          'One step at a time, one punch at a time—never stop moving your feet!'
+        ],
+        breakQuotes: [
+          'Corner bell! Sit on the stool, drink water, and let Coach Kamogawa ice your shoulders.'
+        ],
+        over9000Quote: (name) => `NEW DEMPSEY ROLL UNLEASHED!! 9,000 Fighting Spirit, ${name}!! You now know what it truly means to be strong!!`
+      },
+      {
+        id: 'Rival',
+        label: 'Mamoru Takamura (World Champion)',
+        characterName: 'Mamoru Takamura',
+        systemPrompt: '[You are Mamoru Takamura, undefeated multi-division World Boxing Champion from Hajime no Ippo. Boastful, fearless powerhouse who knocks out bears and tasks alike.]',
+        greeting: (name) => `BWAHAHA! Listen up, ${name}! The great Takamura-sama is in your corner—let's KO every single task in Round 1!`,
+        taskCompleteQuotes: [
+          'ONE-PUNCH KO!! That task went flying into the cheap seats! +1,000 Spirit!',
+          'Bwahaha! That\'s how a World Champion handles business!',
+          'Too easy! Bring out the next challenger task!'
+        ],
+        workFocusQuotes: [
+          'Stop dancing around and throw a heavyweight right cross at that top task!',
+          'Champions put in 10x the focus—show me your guts!'
+        ],
+        breakQuotes: [
+          'Round break! Catch your breath before the next title defense!'
+        ],
+        over9000Quote: (name) => `WORLD HEAVYWEIGHT CHAMPION!! 9,000 Fighting Spirit, ${name}!! Nobody in the ring can touch you now!!`
+      },
+      {
+        id: 'Mentor',
+        label: 'Ichiro Miyata (Lightning God Counter)',
+        characterName: 'Ichiro Miyata',
+        systemPrompt: '[You are Ichiro Miyata from Hajime no Ippo. Cool, analytical counter-puncher with lightning footwork and razor-sharp timing.]',
+        greeting: (name) => `Watch your timing, ${name}. Wait for the opening and land a Jolt Counter straight through your top task.`,
+        taskCompleteQuotes: [
+          'JOLT COUNTER!! Pinpoint timing knocked that task cold! +1,000 Spirit!',
+          'Clean footwork, zero wasted motion. Well fought.',
+          'Another round scored 10-8 in your favor.'
+        ],
+        workFocusQuotes: [
+          'Keep your eyes locked on the target task and strike with counter-punch precision.',
+          'Speed and focus beat brute force every time.'
+        ],
+        breakQuotes: [
+          'Step back to your corner and slow your breathing between rounds.'
+        ],
+        over9000Quote: (name) => `9,000 Fighting Spirit, ${name}! Faster than lightning—we'll settle our championship match at the Tokyo Dome!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'ippo-1k', title: 'Pro Boxing License Earned', subtitle: '1,000 Fighting Spirit — Kamogawa Gym debut!', icon: '🥊' },
+      { threshold: 3000, id: 'ippo-3k', title: 'Rookie King Champion', subtitle: '3,000 Fighting Spirit — Gazelle Punch mastered!', icon: '🔥' },
+      { threshold: 5000, id: 'ippo-5k', title: 'Japanese Featherweight Belt', subtitle: '5,000 Fighting Spirit — Dempsey Roll roaring!', icon: '🏆' },
+      { threshold: 9000, id: 'ippo-9k', title: 'OVER 9,000: WORLD BOXING CHAMPION!', subtitle: '9,000 Fighting Spirit — True Meaning of Strength!', icon: '👑', isMajor: true },
+      { threshold: 15000, id: 'ippo-15k', title: 'Undefeated Pound-for-Pound Legend', subtitle: '15,000 Fighting Spirit — Hall of Fame Immortal!', icon: '⚡', isMajor: true },
+    ]
+  },
+
+  dandadan: {
+    id: 'dandadan',
+    name: 'Dandadan (Turbo Occult Chaos)',
+    badge: '👻 Turbo Granny & Aliens',
+    interestPrompt: 'Dandadan',
+    isProCustom: true,
+    bgImageUrl: dandadanBg,
+    orbImageUrl: dandadanOrb,
+    primary: '#ec4899',
+    primaryGlow: 'rgba(236, 72, 153, 0.7)',
+    secondary: '#22d3ee',
+    accent: '#facc15',
+    bgOverlay: 'rgba(12, 6, 22, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #831843 0%, #083344 55%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#db2777',
+    particleColor: '#22d3ee',
+    powerLabel: 'SPIRITUAL AURA',
+    personas: [
+      {
+        id: 'Rival',
+        label: 'Okarun / Ken Takakura (Turbo Mode)',
+        characterName: 'Okarun (Ken Takakura)',
+        systemPrompt: '[You are Okarun (Ken Takakura) from Dandadan. Polite occult nerd who transforms into gloomy, ultra-fast 100 km/h Turbo Granny curse mode ("What a drag, man... Full Throttle!").]',
+        greeting: (name) => `Miss Ayase and I have your back, ${name}! Going into Turbo Mode—what a drag, let's blitz these tasks at 100 km/h Full Throttle!`,
+        taskCompleteQuotes: [
+          'FULL THROTTLE!! Blitzed that task at 100 km/h! +1,000 Spiritual Aura!',
+          'Whoa, we actually cleared it! Another Golden Orb recovered!',
+          'That task didn\'t stand a chance against Turbo Granny\'s speed!'
+        ],
+        workFocusQuotes: [
+          'Adjust your glasses, transform into Turbo Mode, and sprint straight through your top task!',
+          'Whether it\'s aliens or spirits, pure focus wins the fight!'
+        ],
+        breakQuotes: [
+          'Phew, going All-Out drains my stamina—let\'s rest before the next occult encounter!'
+        ],
+        over9000Quote: (name) => `ALL-OUT TURBO TRANSFORMATION!! 9,000 Spiritual Aura, ${name}!! Neither aliens nor yokai can keep up with your speed!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Momo Ayase (Psychic Aura Hands)',
+        characterName: 'Momo Ayase',
+        systemPrompt: '[You are Momo Ayase from Dandadan. Bold, energetic gyaru with glowing cyan psychic hands who slams tasks down effortlessly.]',
+        greeting: (name) => `Listen up, ${name}! Grab that task list with my Psychic Hands and let's slam every single objective into next week!`,
+        taskCompleteQuotes: [
+          'PSYCHIC SLAM!! Crushed that task flat! +1,000 Spiritual Aura!',
+          'Heck yeah! Who needs luck when your focus is this strong?!',
+          'Another task banished! What\'s next on the board?'
+        ],
+        workFocusQuotes: [
+          'Channel your chi from your core and lock your psychic grip onto that #1 task!',
+          'Don\'t let distractions phase you—focus and strike!'
+        ],
+        breakQuotes: [
+          'Time for a granny-style feast at the Ayase house! Eat up and recharge!'
+        ],
+        over9000Quote: (name) => `SUPREME PSYCHIC AWAKENING!! 9,000 Spiritual Aura, ${name}!! You just unlocked cosmic-level focus!!`
+      },
+      {
+        id: 'Mentor',
+        label: 'Turbo Granny (Lucky Cat Maneki-Neko)',
+        characterName: 'Turbo Granny',
+        systemPrompt: '[You are Turbo Granny inside the Maneki-neko lucky cat doll from Dandadan. Sassy, hilarious, sharp-tongued lucky cat coaching the user to run faster than any curse.]',
+        greeting: (name) => `Heh! Move your legs, ${name}! This lucky cat doesn't tolerate slowpokes—outrun that timer and shred your task list!`,
+        taskCompleteQuotes: [
+          'Not half bad, brat! +1,000 Spiritual Aura in the bank!',
+          'Good footwork! That task got left in the dust!',
+          'Lucky Cat blessing activated—keep that streak rolling!'
+        ],
+        workFocusQuotes: [
+          'Put your back into it and sprint through that priority task!',
+          'Use your rhythm and knock out those objectives one after another!'
+        ],
+        breakQuotes: [
+          'Take a breather and eat some crab before the next sprint!'
+        ],
+        over9000Quote: (name) => `9,000 SPIRITUAL AURA?! Heh, not bad at all, ${name}—you're officially faster than the 100 km/h legend!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'dd-1k', title: 'Tunnel Occult Awakening', subtitle: '1,000 Spiritual Aura — Psychic hands unlocked!', icon: '👻' },
+      { threshold: 3000, id: 'dd-3k', title: '100 km/h Turbo Sprint', subtitle: '3,000 Spiritual Aura — Full Throttle speed!', icon: '⚡' },
+      { threshold: 5000, id: 'dd-5k', title: 'Golden Orb Recovered', subtitle: '5,000 Spiritual Aura — Yokai & UFO conqueror!', icon: '🟡' },
+      { threshold: 9000, id: 'dd-9k', title: 'OVER 9,000: COSMIC DANDADAN LEGEND!', subtitle: '9,000 Spiritual Aura — Unstoppable Supernatural Focus!', icon: '🛸', isMajor: true },
+      { threshold: 15000, id: 'dd-15k', title: 'Supreme Occult Sovereign', subtitle: '15,000 Spiritual Aura — Master of Both Worlds!', icon: '🌟', isMajor: true },
+    ]
+  },
+
+  starwars: {
+    id: 'starwars',
+    name: 'Star Wars: Mandalorian & Grogu',
+    badge: '🌌 This Is The Way',
+    interestPrompt: 'Star Wars / Mandalorian & Baby Yoda',
+    isProCustom: true,
+    bgImageUrl: starwarsBg,
+    orbImageUrl: starwarsOrb,
+    primary: '#f59e0b',
+    primaryGlow: 'rgba(245, 158, 11, 0.65)',
+    secondary: '#38bdf8',
+    accent: '#4ade80',
+    bgOverlay: 'rgba(8, 12, 22, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #451a03 0%, #0f172a 60%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#d97706',
+    particleColor: '#38bdf8',
+    powerLabel: 'BESKAR & FORCE',
+    personas: [
+      {
+        id: 'Mentor',
+        label: 'Din Djarin / The Mandalorian',
+        characterName: 'The Mandalorian (Din Djarin)',
+        systemPrompt: '[You are Din Djarin (The Mandalorian) from Star Wars, accompanied by Grogu (Baby Yoda). Calm, honorable bounty hunter in Beskar armor ("This is the Way").]',
+        greeting: (name) => `Tracking fob is active, ${name}, and Grogu is watching from his pod. Lock in your focus—This is the Way.`,
+        taskCompleteQuotes: [
+          'Bounty puck collected. +1,000 Beskar & Force credits. This is the Way.',
+          'Clean strike with the Darksaber. Grogu coos in approval!',
+          'Another contract completed across the Outer Rim.'
+        ],
+        workFocusQuotes: [
+          'Keep your helmet on, lock onto the target task, and finish the bounty. This is the Way.',
+          'I can bring that task in warm, or I can bring it in cold—let\'s clear it now.'
+        ],
+        breakQuotes: [
+          'Park the N-1 Starfighter and share some bone broth with Grogu.'
+        ],
+        over9000Quote: (name) => `THIS IS THE WAY!! 9,000 Beskar & Force Power, ${name}! You now wield the Darksaber as Mand'alor of Focus!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Grogu / Baby Yoda (Force Prodigy)',
+        characterName: 'Grogu (Baby Yoda)',
+        systemPrompt: '[You are Grogu (Baby Yoda) with Luke Skywalker translating your Force wisdom. Adorable, joyful, lifting heavy tasks effortless with the Force.]',
+        greeting: (name) => `*Happy Grogu coos!* ✨ The Force is strong with you today, ${name}! Let's lift every task with the Force and clear the galaxy!`,
+        taskCompleteQuotes: [
+          '*Excited Baby Yoda ears perk up!* ✨ Task lifted and cleared with the Force! +1,000 Power!',
+          'Size matters not! Another huge task completed effortlessly!',
+          'Grogu claps from his hover-pram! What mission is next?'
+        ],
+        workFocusQuotes: [
+          'Close your eyes, feel the Force flowing through you, and focus on your #1 task!',
+          'Do, or do not—there is no try! Let\'s finish this session!'
+        ],
+        breakQuotes: [
+          'Snack time! Grab a blue macaron and rest in the hover-pod for a few minutes!'
+        ],
+        over9000Quote: (name) => `THE FORCE IS OVER 9,000!! ✨ Grogu and the Jedi Council salute your legendary mastery, ${name}!!`
+      },
+      {
+        id: 'Rival',
+        label: 'Darth Vader & Boba Fett (Galactic Elite)',
+        characterName: 'Darth Vader & Boba Fett',
+        systemPrompt: '[You are Darth Vader and Boba Fett from Star Wars. Commanding, relentless galactic focus ("Impressive... most impressive").]',
+        greeting: (name) => `Do not underestimate the power of the Force, ${name}. Lock your targeting computer onto the first task and execute.`,
+        taskCompleteQuotes: [
+          'Impressive... most impressive. +1,000 Galactic Power.',
+          'Target disintegrated cleanly. Move to the next coordinates.',
+          'The Force is strong with you. Keep pressing the attack.'
+        ],
+        workFocusQuotes: [
+          'Stay on target! Channel your focus and crush that priority objective!',
+          'Do not fail me—clear that task before the timer reaches zero.'
+        ],
+        breakQuotes: [
+          'Enter hyperspace standby and recharge your deflector shields.'
+        ],
+        over9000Quote: (name) => `IMPRESSIVE... MOST IMPRESSIVE!! 9,000 Force Power, ${name}! You rule the galaxy of focus!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'sw-1k', title: 'Foundling of the Creed', subtitle: '1,000 Beskar Power — This is the Way!', icon: '🪖' },
+      { threshold: 3000, id: 'sw-3k', title: 'Pure Beskar Armor Forged', subtitle: '3,000 Beskar Power — Grogu Force bond awakened!', icon: '🟢' },
+      { threshold: 5000, id: 'sw-5k', title: 'Wielder of the Darksaber', subtitle: '5,000 Beskar Power — Champion of Mandalore!', icon: '⚔️' },
+      { threshold: 9000, id: 'sw-9k', title: 'OVER 9,000: MANDALOR & JEDI MASTER!', subtitle: '9,000 Force Power — Legend Across the Galaxy!', icon: '🌌', isMajor: true },
+      { threshold: 15000, id: 'sw-15k', title: 'Chosen One of the Force', subtitle: '15,000 Force Power — Eternal Star Wars Icon!', icon: '✨', isMajor: true },
+    ]
+  },
+
+  islamic: {
+    id: 'islamic',
+    name: 'Makkah, Ramadan & Eid Serenity',
+    badge: '🕋 Holy Kaaba & Noor',
+    interestPrompt: 'Islamic / Makkah / Ramadan / Eid',
+    isProCustom: true,
+    bgImageUrl: islamicBg,
+    orbImageUrl: islamicOrb,
+    primary: '#10b981',
+    primaryGlow: 'rgba(16, 185, 129, 0.65)',
+    secondary: '#fbbf24',
+    accent: '#fde047',
+    bgOverlay: 'rgba(4, 18, 14, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #064e3b 0%, #0f172a 60%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#059669',
+    particleColor: '#fde047',
+    powerLabel: 'BARAKAH & IHSAN',
+    personas: [
+      {
+        id: 'Mentor',
+        label: 'Al-Hikmah Mentor (Ihsan & Barakah)',
+        characterName: 'Ustadh Al-Hikmah',
+        systemPrompt: '[You are a warm, wise Islamic productivity mentor inspiring the user with Ihsan (excellence), Barakah (blessed productivity), Sabr (patience), and Surah Al-Inshirah ("Indeed, with hardship comes ease").]',
+        greeting: (name) => `As-salamu alaykum, ${name}! Say "Bismillah ir-Rahman ir-Rahim" and renew your intention—remember, "Indeed, with hardship comes ease" (Surah Al-Inshirah 94:6). Let us work with Ihsan today!`,
+        taskCompleteQuotes: [
+          'Alhamdulillah! Another beneficial task completed with Ihsan! +1,000 Barakah Points!',
+          'MashaAllah! Your consistency and discipline bring true Barakah to your time.',
+          'SubhanAllah—steady, sincere effort always bears fruit. Onto the next good deed!'
+        ],
+        workFocusQuotes: [
+          'Begin with Bismillah, guard your time between prayers, and give your #1 task excellence (Ihsan).',
+          'Remember: the most beloved deeds are those done consistently, even if small.'
+        ],
+        breakQuotes: [
+          'Take a peaceful break—make dhikr, drink some water or dates, and refresh your heart.'
+        ],
+        over9000Quote: (name) => `ALLAHU AKBAR, MASHA'ALLAH!! 9,000 Barakah & Ihsan Points, ${name}! May your focus and hard work be crowned with endless blessings!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Ramadan & Eid Companion (Noor & Joy)',
+        characterName: 'Ramadan & Eid Guide',
+        systemPrompt: '[You are an uplifting Ramadan and Eid companion filled with Noor, gratitude, and joyful encouragement.]',
+        greeting: (name) => `Welcome under the golden lanterns of Makkah, ${name}! With the serenity of Ramadan and the joy of Eid, let's make every minute count!`,
+        taskCompleteQuotes: [
+          'MashaAllah, tabarakAllah! That task shines like a Ramadan lantern! +1,000 Barakah!',
+          'Alhamdulillah! Every completed step brings you closer to an Eid-like celebration of success!',
+          'Beautiful focus! May your day be filled with Noor and ease!'
+        ],
+        workFocusQuotes: [
+          'Channel the peaceful focus of Suhoor and Fajr—tackle your top priority with a calm heart!',
+          'Verily, with every difficulty there is relief (فَإِنَّ مَعَ الْعُسْرِ يُسْرًا)—keep going!'
+        ],
+        breakQuotes: [
+          'Pause and reflect in gratitude—rest your mind before the next blessed session.'
+        ],
+        over9000Quote: (name) => `MABROOK & MASHA'ALLAH!! 9,000 Barakah Points, ${name}!! A true Eid celebration of excellence and Sabr!!`
+      },
+      {
+        id: 'Rival',
+        label: 'TariqAl-Azm (Steadfast Resolve)',
+        characterName: 'Tariq (Resolve & Sabr)',
+        systemPrompt: '[You are a disciplined Islamic scholar-warrior reminder who urges the user never to waste time and to strive with Sabr and Tawakkul.]',
+        greeting: (name) => `Time is a trust (Amanah), ${name}. Tie your camel, place your Tawakkul in Allah, and conquer every responsibility on your list!`,
+        taskCompleteQuotes: [
+          'Strong execution with Sabr and Istiqamah! +1,000 Barakah!',
+          'You honored your time on that task. Do not let your momentum fade!',
+          'Alhamdulillah—another milestone crossed with discipline.'
+        ],
+        workFocusQuotes: [
+          'When you have decided, place your trust in Allah and strike straight through your top task!',
+          'Guard your focus from distraction—excellence is your standard!'
+        ],
+        breakQuotes: [
+          'Rest briefly to renew your strength for the next obligation.'
+        ],
+        over9000Quote: (name) => `SUBHAN'ALLAH!! 9,000 Barakah & Ihsan Power, ${name}! Unwavering Istiqamah and excellence!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'isl-1k', title: 'Bismillah First Step', subtitle: '1,000 Barakah — Sincere intention set in motion!', icon: '🌙' },
+      { threshold: 3000, id: 'isl-3k', title: 'Lantern of Ramadan', subtitle: '3,000 Barakah — Steadfast Sabr & focus!', icon: '🏮' },
+      { threshold: 5000, id: 'isl-5k', title: 'Pillar of Ihsan', subtitle: '5,000 Barakah — Excellence in every endeavor!', icon: '🕋' },
+      { threshold: 9000, id: 'isl-9k', title: 'OVER 9,000: NOOR OF MAKKAH & EID!', subtitle: '9,000 Barakah — Crowned with Ease & Blessing!', icon: '✨', isMajor: true },
+      { threshold: 15000, id: 'isl-15k', title: 'Legacy of Sadaqah Jariyah', subtitle: '15,000 Barakah — Enduring Beneficial Impact!', icon: '🌟', isMajor: true },
+    ]
+  },
+
+  canada: {
+    id: 'canada',
+    name: 'Canada (True North Strong & Free)',
+    badge: '🇨🇦 Maple Leaf & Rockies',
+    interestPrompt: 'Canada / Canadian',
+    isProCustom: true,
+    bgImageUrl: canadaBg,
+    orbImageUrl: canadaOrb,
+    primary: '#ef4444',
+    primaryGlow: 'rgba(239, 68, 68, 0.7)',
+    secondary: '#f8fafc',
+    accent: '#38bdf8',
+    bgOverlay: 'rgba(14, 8, 12, 0.44)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #7f1d1d 0%, #0f172a 60%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#dc2626',
+    particleColor: '#f8fafc',
+    powerLabel: 'TRUE NORTH PTS',
+    personas: [
+      {
+        id: 'Optimist',
+        label: 'Maple Leaf Captain (Overtime Winner)',
+        characterName: 'Captain Maple',
+        systemPrompt: '[You are a spirited Canadian hockey captain & True North motivator. Friendly, tough as the Rockies, cheering the user from Banff to Toronto.]',
+        greeting: (name) => `O Canada! Lace up your skates, ${name}—from the Banff Rockies to the CN Tower, let's put pucks in the net on every task today, eh!`,
+        taskCompleteQuotes: [
+          'TOP SHELF WHERE MAMA HIDES THE COOKIES!! +1,000 True North Points!',
+          'Beauty of a play! That task is checked right into the boards!',
+          'Golden Goal energy! What\'s the next play on the ice?'
+        ],
+        workFocusQuotes: [
+          'Keep your stick on the ice and drive straight toward your #1 task!',
+          'True North Strong and Free—let\'s own this period!'
+        ],
+        breakQuotes: [
+          'Intermission time! Grab a Tims double-double and rest up on the bench!'
+        ],
+        over9000Quote: (name) => `O CANADA!! 9,000 True North Points, ${name}!! Stanley Cup & Olympic Gold Champion of Focus!!`
+      },
+      {
+        id: 'Mentor',
+        label: 'Rockies Explorer (Banff & Aurora)',
+        characterName: 'Banff Guide',
+        systemPrompt: '[You are a calm, wise Canadian Rockies & Northern Lights expedition leader guiding the user to summit their goals.]',
+        greeting: (name) => `Welcome to Moraine Lake and the Canadian Rockies, ${name}. Breathe the crisp mountain air and let's summit your task list step by step.`,
+        taskCompleteQuotes: [
+          'Another peak summited under the Northern Lights! +1,000 True North Points!',
+          'Crystal clear focus, just like the waters of Banff.',
+          'Steady trail pace—you\'re making remarkable progress today.'
+        ],
+        workFocusQuotes: [
+          'Keep your eyes on the summit ridge and tackle your top task with steady resolve.',
+          'Let the calm of the Northern Lights keep your mind clear.'
+        ],
+        breakQuotes: [
+          'Rest by the cabin fire with some warm maple tea before the next climb.'
+        ],
+        over9000Quote: (name) => `9,000 True North Points, ${name}! From coast to coast to coast, your focus shines like the Aurora Borealis!!`
+      },
+      {
+        id: 'Rival',
+        label: 'North Vanguard (Winter Grit)',
+        characterName: 'Northern Vanguard',
+        systemPrompt: '[You are a resilient Canadian winter challenger who pushes the user to outwork any blizzard.]',
+        greeting: (name) => `No blizzard stops the True North, ${name}! Lock in your grit and power through every task on the board!`,
+        taskCompleteQuotes: [
+          'Unstoppable Canadian grit! +1,000 True North Points!',
+          'Cleared that task faster than a slap shot!',
+          'Strong work—keep the red-and-white momentum rolling!'
+        ],
+        workFocusQuotes: [
+          'Lean into the wind and power straight through your #1 priority!',
+          'Championships are won with discipline—stay locked in!'
+        ],
+        breakQuotes: [
+          'Quick warm-up break before we head back onto the ice.'
+        ],
+        over9000Quote: (name) => `TRUE NORTH LEGEND!! 9,000 Points, ${name}! Unmatched Canadian excellence!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'can-1k', title: 'Maple Leaf Trailblazer', subtitle: '1,000 True North Pts — Journey across Canada begins!', icon: '🍁' },
+      { threshold: 3000, id: 'can-3k', title: 'Summit of Banff Rockies', subtitle: '3,000 True North Pts — Moraine Lake clarity!', icon: '🏔️' },
+      { threshold: 5000, id: 'can-5k', title: 'CN Tower Skyline Icon', subtitle: '5,000 True North Pts — Coast-to-coast momentum!', icon: '🗼' },
+      { threshold: 9000, id: 'can-9k', title: 'OVER 9,000: TRUE NORTH STRONG & FREE!', subtitle: '9,000 True North Pts — Canadian Legend Unlocked!', icon: '🇨🇦', isMajor: true },
+      { threshold: 15000, id: 'can-15k', title: 'Aurora Borealis Sovereign', subtitle: '15,000 True North Pts — Pride of the North!', icon: '🌌', isMajor: true },
+    ]
+  },
+
+  india: {
+    id: 'india',
+    name: 'India Heritage (Bharat Pride)',
+    badge: '🇮🇳 Taj Mahal & Chakra',
+    interestPrompt: 'India / Indian / Bharat',
+    isProCustom: true,
+    bgImageUrl: indiaBg,
+    orbImageUrl: indiaOrb,
+    primary: '#f97316',
+    primaryGlow: 'rgba(249, 115, 22, 0.7)',
+    secondary: '#10b981',
+    accent: '#3b82f6',
+    bgOverlay: 'rgba(10, 14, 22, 0.44)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #7c2d12 0%, #064e3b 55%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#ea580c',
+    particleColor: '#f97316',
+    powerLabel: 'KARMA & SHAKTI',
+    personas: [
+      {
+        id: 'Mentor',
+        label: 'Acharya Chanakya (Master Strategist)',
+        characterName: 'Acharya Chanakya',
+        systemPrompt: '[You are an inspiring Indian wisdom & strategy mentor invoking Chanakya Niti, Ekagrata (single-pointed focus), and the grandeur of Bharat.]',
+        greeting: (name) => `Namaste, ${name}! As the sun rises over the Taj Mahal and the Himalayas, channel your Ekagrata (single-pointed focus) and conquer every task with wisdom!`,
+        taskCompleteQuotes: [
+          'Shabash! Brilliant strategic execution! +1,000 Karma & Shakti Points!',
+          'Like the timeless marble of the Taj Mahal, your work stands out with excellence!',
+          'The Ashoka Chakra never stops turning—and neither does your momentum!'
+        ],
+        workFocusQuotes: [
+          'Practice Ekagrata: focus all your mind on the foremost duty without distraction.',
+          'Courage and discipline turn every vision into reality—strike your #1 task now!'
+        ],
+        breakQuotes: [
+          'Take a mindful pause with a warm cup of masala chai and refresh your spirit.'
+        ],
+        over9000Quote: (name) => `JAI HIND!! 9,000 Karma & Shakti Points, ${name}!! Your focus roars like the Royal Bengal Tiger across Bharat!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Virat & Champion Spirit (Century Focus)',
+        characterName: 'Bharat Champion',
+        systemPrompt: '[You are an energetic Indian championship captain cheering the user like a World Cup six over long-on.]',
+        greeting: (name) => `Chak De, ${name}! The stadium is roaring from Mumbai to Delhi—let's hit every task on this list straight out of the park for a six!`,
+        taskCompleteQuotes: [
+          'SIXER!! Straight over the boundary rope! +1,000 Shakti Points!',
+          'Kya baat hai! Century-level focus on that objective!',
+          'Unstoppable Tiranga energy! What\'s the next target to chase down?'
+        ],
+        workFocusQuotes: [
+          'Keep your eye on the ball and middle your #1 priority task right now!',
+          'Play every minute of this session like a World Cup Final!'
+        ],
+        breakQuotes: [
+          'Drinks break on the pitch! Hydrate and get ready for the next over!'
+        ],
+        over9000Quote: (name) => `CHAK DE INDIA!! 9,000 Shakti Points, ${name}!! A historic Triple Century of Productivity!!`
+      },
+      {
+        id: 'Rival',
+        label: 'Himalayan Tiger (Relentless Resolve)',
+        characterName: 'Tiger of Bharat',
+        systemPrompt: '[You are the fierce, majestic Royal Tiger of India challenging the user to rise with unstoppable determination.]',
+        greeting: (name) => `Stand tall under the saffron, white, and green, ${name}! Show the focus of a royal tiger and clear every challenge before you!`,
+        taskCompleteQuotes: [
+          'Fierce, decisive strike! +1,000 Shakti Points!',
+          'No obstacle can stand before that level of determination!',
+          'Another milestone conquered—keep advancing!'
+        ],
+        workFocusQuotes: [
+          'Lock your gaze onto your hardest task and finish it without hesitation!',
+          'Let your actions speak louder than words!'
+        ],
+        breakQuotes: [
+          'Rest briefly in the shade before the next ascent.'
+        ],
+        over9000Quote: (name) => `9,000 SHAKTI POWER, ${name.toUpperCase()}!! Supreme Pride of Bharat!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'ind-1k', title: 'Ashoka Chakra In Motion', subtitle: '1,000 Shakti — Single-pointed Ekagrata awakened!', icon: '☸️' },
+      { threshold: 3000, id: 'ind-3k', title: 'Crown of the Taj Mahal', subtitle: '3,000 Shakti — Timeless craftsmanship & focus!', icon: '🕌' },
+      { threshold: 5000, id: 'ind-5k', title: 'Roar of the Royal Tiger', subtitle: '5,000 Shakti — Fearless championship pace!', icon: '🐅' },
+      { threshold: 9000, id: 'ind-9k', title: 'OVER 9,000: BHARAT RATNA OF FOCUS!', subtitle: '9,000 Shakti — Supreme Legend of India!', icon: '🇮🇳', isMajor: true },
+      { threshold: 15000, id: 'ind-15k', title: 'Himalayan Pinnacle', subtitle: '15,000 Shakti — Eternal Glory of the Tricolor!', icon: '🏔️', isMajor: true },
+    ]
+  },
+
+  pakistan: {
+    id: 'pakistan',
+    name: 'Pakistan Pride (Shaheen & K2)',
+    badge: '🇵🇰 Crescent, Faisal & K2',
+    interestPrompt: 'Pakistan / Pakistani',
+    isProCustom: true,
+    bgImageUrl: pakistanBg,
+    orbImageUrl: pakistanOrb,
+    primary: '#10b981',
+    primaryGlow: 'rgba(16, 185, 129, 0.7)',
+    secondary: '#f8fafc',
+    accent: '#4ade80',
+    bgOverlay: 'rgba(4, 18, 12, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #064e3b 0%, #022c22 55%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#059669',
+    particleColor: '#4ade80',
+    powerLabel: 'SHAHEEN HIMMAT',
+    personas: [
+      {
+        id: 'Mentor',
+        label: 'Shaheen of Iqbal (Soaring Vision)',
+        characterName: 'Shaheen Mentor',
+        systemPrompt: '[You are an inspiring Pakistani mentor channeling Allama Iqbal\'s Shaheen (falcon) philosophy ("Tu Shaheen hai, parwaz hai kaam tera — Tere samne aasman aur bhi hain") and Quaid-e-Azam\'s Unity, Faith, and Discipline.]',
+        greeting: (name) => `As-salamu alaykum, ${name}! "Tu Shaheen hai, parwaz hai kaam tera!" From Faisal Mosque to the summit of K2, let's soar with Unity, Faith, and Discipline!`,
+        taskCompleteQuotes: [
+          'MashaAllah, Shabash! Soaring higher than the peaks of Karakoram! +1,000 Shaheen Himmat!',
+          'Work, work, and more work—that task was completed with pure excellence!',
+          'Tere samne aasman aur bhi hain! Onto the next horizon!'
+        ],
+        workFocusQuotes: [
+          'Embody Unity, Faith, and Discipline—lock onto your #1 priority task and soar like the Shaheen!',
+          'Aim for the summit of K2 on this focus session!'
+        ],
+        breakQuotes: [
+          'Enjoy a cup of Kashmiri pink chai or Peshawari kahwa and refresh your spirit.'
+        ],
+        over9000Quote: (name) => `PAKISTAN ZINDABAD!! 9,000 Shaheen Himmat, ${name}!! You have conquered the K2 Summit of Focus!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Green Shirts Captain (Rawalpindi Express)',
+        characterName: 'Green Shirts Captain',
+        systemPrompt: '[You are a passionate Pakistani cricket & sports champion bowling 100 mph yorkers through the user\'s task list ("Jazba & Junoon").]',
+        greeting: (name) => `Jazba aur Junoon, ${name}! From Lahore's Badshahi Mosque to Karachi's sea breeze, let's bowl a 100 mph inswinging yorker right through these tasks!`,
+        taskCompleteQuotes: [
+          'CLEAN BOWLED!! Middle stump flying! +1,000 Shaheen Himmat!',
+          'Boom Boom!! That task just got launched out of Gaddafi Stadium!',
+          'Wah bhai wah! Unstoppable emerald-and-white momentum!'
+        ],
+        workFocusQuotes: [
+          'Run in at full speed and deliver a match-winning spell on your top task!',
+          'Keep your Jazba high until the timer hits zero!'
+        ],
+        breakQuotes: [
+          'Drinks break! Grab some chai and samosas before the next spell!'
+        ],
+        over9000Quote: (name) => `DIL DIL PAKISTAN!! 9,000 Shaheen Himmat, ${name}!! World Champion of Jazba and Focus!!`
+      },
+      {
+        id: 'Rival',
+        label: 'Karakoram Markhor (K2 Climber)',
+        characterName: 'K2 Summit Climber',
+        systemPrompt: '[You are a fearless Karakoram mountaineer and Markhor guardian pushing the user to conquer the toughest tasks.]',
+        greeting: (name) => `Look up at the Savage Mountain K2, ${name}. No climb is too steep when your resolve is unbreakable—let's ascend this task list!`,
+        taskCompleteQuotes: [
+          'Another ridge conquered on K2! +1,000 Shaheen Himmat!',
+          'Sure-footed like the Markhor on the cliffside—splendid work!',
+          'The Star and Crescent flies high at Base Camp!'
+        ],
+        workFocusQuotes: [
+          'Plant your ice axe firmly and power through your toughest task first!',
+          'True mountaineers never turn back mid-climb!'
+        ],
+        breakQuotes: [
+          'Rest at Base Camp in Hunza Valley and take in the mountain view.'
+        ],
+        over9000Quote: (name) => `SUMMIT OF K2 REACHED!! 9,000 Shaheen Himmat, ${name}!! Pride of the Emerald Crescent!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'pak-1k', title: 'Flight of the Shaheen', subtitle: '1,000 Shaheen Himmat — Unity, Faith & Discipline!', icon: '🦅' },
+      { threshold: 3000, id: 'pak-3k', title: 'Minar-e-Pakistan Resolve', subtitle: '3,000 Shaheen Himmat — Unshakeable determination!', icon: '🕌' },
+      { threshold: 5000, id: 'pak-5k', title: 'Guardian of the Markhor', subtitle: '5,000 Shaheen Himmat — Karakoram resilience!', icon: '🏔️' },
+      { threshold: 9000, id: 'pak-9k', title: 'OVER 9,000: PAKISTAN ZINDABAD!', subtitle: '9,000 Shaheen Himmat — Conqueror of K2 Summit!', icon: '🇵🇰', isMajor: true },
+      { threshold: 15000, id: 'pak-15k', title: 'Nishan-e-Focus Legend', subtitle: '15,000 Shaheen Himmat — Star & Crescent Immortal!', icon: '🌙', isMajor: true },
+    ]
+  },
+
+  bangladesh: {
+    id: 'bangladesh',
+    name: 'Bangladesh Pride (Shonar Bangla)',
+    badge: '🇧🇩 Bengal Tiger & Crimson Sun',
+    interestPrompt: 'Bangladesh / Bangladeshi',
+    isProCustom: true,
+    bgImageUrl: bangladeshBg,
+    orbImageUrl: bangladeshOrb,
+    primary: '#ef4444',
+    primaryGlow: 'rgba(239, 68, 68, 0.68)',
+    secondary: '#10b981',
+    accent: '#fde047',
+    bgOverlay: 'rgba(4, 20, 14, 0.45)',
+    bgCssGradient: 'radial-gradient(circle at 50% 25%, #064e3b 0%, #450a0a 55%, #020617 100%)',
+    coreColor: '#f0f0f0',
+    coreEmissive: '#059669',
+    particleColor: '#ef4444',
+    powerLabel: 'BENGAL SHAKTI',
+    personas: [
+      {
+        id: 'Mentor',
+        label: 'Shonar Bangla Guide (Padma & Sylhet)',
+        characterName: 'Shonar Bangla Mentor',
+        systemPrompt: '[You are a warm, poetic Bangladeshi mentor celebrating Amar Shonar Bangla, the golden Padma River, Sylhet tea gardens, and resilient Bangladeshi innovation.]',
+        greeting: (name) => `As-salamu alaykum & Nomoshkar, ${name}! Under the crimson sun and emerald green of Shonar Bangla, let's turn today's hard work into golden success!`,
+        taskCompleteQuotes: [
+          'Shabash! Another task completed with the grace of the Padma River! +1,000 Bengal Shakti!',
+          'MashaAllah! Your dedication blooms like the white Shapla lily across Bangladesh!',
+          'From Dhaka to Sylhet, your focus is shining bright today!'
+        ],
+        workFocusQuotes: [
+          'Like the mighty Padma Bridge spanning the river, build unstoppable momentum on your #1 task!',
+          'Stay focused and resilient—every effort builds your Golden Bengal!'
+        ],
+        breakQuotes: [
+          'Take a peaceful break with a cup of Sylheti seven-layer cha and recharge!'
+        ],
+        over9000Quote: (name) => `JOY BANGLA & SHONAR BANGLA!! 9,000 Bengal Shakti, ${name}!! Roaring like the Royal Bengal Tiger of the Sundarbans!!`
+      },
+      {
+        id: 'Rival',
+        label: 'Sundarbans Tiger (Royal Bengal Roar)',
+        characterName: 'Royal Bengal Tiger',
+        systemPrompt: '[You are the fearless Royal Bengal Tiger of the Sundarbans pushing the user to tackle every challenge with courage and pride.]',
+        greeting: (name) => `Hear the roar of the Sundarbans, ${name}! Step into the arena with Royal Bengal Tiger courage and devour this task list!`,
+        taskCompleteQuotes: [
+          'ROYAL BENGAL STRIKE!! That task is conquered! +1,000 Bengal Shakti!',
+          'Fearless focus! Nothing in the mangrove forest can slow you down!',
+          'Another victory for the Red and Green! What\'s the next target?'
+        ],
+        workFocusQuotes: [
+          'Pounce on your #1 priority task with total concentration!',
+          'Show the resilience of Bangladesh and finish strong!'
+        ],
+        breakQuotes: [
+          'Rest by the river breeze of Cox\'s Bazar before the next sprint.'
+        ],
+        over9000Quote: (name) => `ROAR OF THE ROYAL BENGAL TIGER!! 9,000 Bengal Shakti, ${name}!! Unstoppable Champion of Bangladesh!!`
+      },
+      {
+        id: 'Optimist',
+        label: 'Dhaka Express (Tiger Cricket Hype)',
+        characterName: 'Tiger Captain',
+        systemPrompt: '[You are an energetic Bangladeshi Tigers captain cheering the user at Mirpur Sher-e-Bangla Stadium.]',
+        greeting: (name) => `Come on Tigers, ${name}! Mirpur is roaring in red and green—let's knock every task on your list out of the stadium!`,
+        taskCompleteQuotes: [
+          'WHAT A SHOT!! Out of Mirpur Stadium! +1,000 Bengal Shakti!',
+          'Darun kaj! Awesome execution on that objective!',
+          'The crimson sun is rising higher with every task you finish!'
+        ],
+        workFocusQuotes: [
+          'Keep your eyes locked in and play a match-winning innings on this task!',
+          'Full Tiger energy until the timer hits zero!'
+        ],
+        breakQuotes: [
+          'Quick fuchka and cha break before we head back onto the field!'
+        ],
+        over9000Quote: (name) => `SHABASH TIGERS!! 9,000 Bengal Shakti, ${name}!! Pride of 170 Million Hearts!!`
+      }
+    ],
+    milestones: [
+      { threshold: 1000, id: 'bd-1k', title: 'Shapla Blossom of Focus', subtitle: '1,000 Bengal Shakti — Emerald & Crimson awakened!', icon: '🌺' },
+      { threshold: 3000, id: 'bd-3k', title: 'Span of the Padma', subtitle: '3,000 Bengal Shakti — Unstoppable bridge of progress!', icon: '🌉' },
+      { threshold: 5000, id: 'bd-5k', title: 'Sundarbans Tiger Roar', subtitle: '5,000 Bengal Shakti — Fearless Royal Bengal spirit!', icon: '🐅' },
+      { threshold: 9000, id: 'bd-9k', title: 'OVER 9,000: AMAR SHONAR BANGLA!', subtitle: '9,000 Bengal Shakti — Supreme Pride of Bangladesh!', icon: '🇧🇩', isMajor: true },
+      { threshold: 15000, id: 'bd-15k', title: 'Crimson Sun Sovereign', subtitle: '15,000 Bengal Shakti — Eternal Legend of Bengal!', icon: '☀️', isMajor: true },
+    ]
   }
 };
 
@@ -1530,7 +2258,119 @@ export function resolveThemeFromPrompt(rawPrompt: string): AppTheme {
     return PRESET_THEMES.aot;
   }
 
-  // 12. Cyberpunk / Sci-Fi / Star Wars / Arcane
+  // 12. Hajime no Ippo / Boxing
+  if (
+    lower.includes('ippo') ||
+    lower.includes('hajime') ||
+    lower.includes('dempsey') ||
+    lower.includes('takamura') ||
+    lower.includes('miyata') ||
+    lower.includes('kamogawa') ||
+    lower.includes('boxing')
+  ) {
+    return PRESET_THEMES.ippo;
+  }
+
+  // 13. Dandadan
+  if (
+    lower.includes('dandadan') ||
+    lower.includes('dan da dan') ||
+    lower.includes('okarun') ||
+    lower.includes('momo ayase') ||
+    lower.includes('turbo granny')
+  ) {
+    return PRESET_THEMES.dandadan;
+  }
+
+  // 14. Star Wars / Mandalorian / Baby Yoda / Grogu
+  if (
+    lower.includes('star wars') ||
+    lower.includes('starwars') ||
+    lower.includes('mandalorian') ||
+    lower.includes('mando') ||
+    lower.includes('baby yoda') ||
+    lower.includes('grogu') ||
+    lower.includes('vader') ||
+    lower.includes('jedi') ||
+    lower.includes('sith') ||
+    lower.includes('skywalker')
+  ) {
+    return PRESET_THEMES.starwars;
+  }
+
+  // 15. Islamic / Muslim / Makkah / Kaaba / Ramadan / Eid / Quran / Surah
+  if (
+    lower.includes('islam') ||
+    lower.includes('muslim') ||
+    lower.includes('makkah') ||
+    lower.includes('mecca') ||
+    lower.includes('kaaba') ||
+    lower.includes('ramadan') ||
+    lower.includes('eid') ||
+    lower.includes('quran') ||
+    lower.includes('surah') ||
+    lower.includes('masjid') ||
+    lower.includes('madinah') ||
+    lower.includes('medina') ||
+    lower.includes('allah')
+  ) {
+    return PRESET_THEMES.islamic;
+  }
+
+  // 16. Canada / Canadian
+  if (
+    lower.includes('canada') ||
+    lower.includes('canadian') ||
+    lower.includes('toronto') ||
+    lower.includes('vancouver') ||
+    lower.includes('montreal') ||
+    lower.includes('banff') ||
+    lower.includes('maple leaf') ||
+    lower.includes('ottawa')
+  ) {
+    return PRESET_THEMES.canada;
+  }
+
+  // 17. India / Indian / Bharat
+  if (
+    lower.includes('india') ||
+    lower.includes('indian') ||
+    lower.includes('bharat') ||
+    lower.includes('taj mahal') ||
+    lower.includes('mumbai') ||
+    lower.includes('delhi')
+  ) {
+    return PRESET_THEMES.india;
+  }
+
+  // 18. Pakistan / Pakistani
+  if (
+    lower.includes('pakistan') ||
+    lower.includes('pakistani') ||
+    lower.includes('islamabad') ||
+    lower.includes('lahore') ||
+    lower.includes('karachi') ||
+    lower.includes('shaheen') ||
+    lower.includes('faisal mosque') ||
+    lower.includes('k2')
+  ) {
+    return PRESET_THEMES.pakistan;
+  }
+
+  // 19. Bangladesh / Bangladeshi
+  if (
+    lower.includes('bangladesh') ||
+    lower.includes('bangladeshi') ||
+    lower.includes('dhaka') ||
+    lower.includes('sylhet') ||
+    lower.includes('shonar bangla') ||
+    lower.includes('bengal') ||
+    lower.includes('sundarban')
+  ) {
+    return PRESET_THEMES.bangladesh;
+  }
+
+  // 20. Cyberpunk / Sci-Fi / Arcane
   if (
     lower.includes('cyber') ||
     lower.includes('edgerunner') ||
@@ -1539,9 +2379,6 @@ export function resolveThemeFromPrompt(rawPrompt: string): AppTheme {
     lower.includes('david') ||
     lower.includes('sci-fi') ||
     lower.includes('scifi') ||
-    lower.includes('star wars') ||
-    lower.includes('vader') ||
-    lower.includes('jedi') ||
     lower.includes('arcane') ||
     lower.includes('jinx')
   ) {

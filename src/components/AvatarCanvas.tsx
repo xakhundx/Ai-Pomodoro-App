@@ -122,26 +122,41 @@ function AICore({
   useEffect(() => {
     setLoadedTexture(fallbackTexture);
     const targetUrl = theme.orbImageUrl || gokuImage;
-    const loader = new THREE.TextureLoader();
-    loader.setCrossOrigin('anonymous');
-    loader.load(
-      targetUrl,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.ClampToEdgeWrapping;
-        tex.repeat.set(-2, 1);
-        tex.offset.set(1.5, 0);
-        tex.anisotropy = 16;
-        tex.needsUpdate = true;
-        setLoadedTexture(tex);
-      },
-      undefined,
-      () => {
-        // Keep high-res procedural fallback if remote texture fails
-        setLoadedTexture(fallbackTexture);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // Normalize any orb image onto a 1:1 square 1024x1024 canvas (center-cover)
+      // so widescreen or portrait images never look stretched on the 3D sphere
+      const canvas = document.createElement('canvas');
+      const size = 1024;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        const iw = img.naturalWidth || img.width || size;
+        const ih = img.naturalHeight || img.height || size;
+        const scale = Math.max(size / iw, size / ih);
+        const sw = size / scale;
+        const sh = size / scale;
+        const sx = (iw - sw) / 2;
+        const sy = (ih - sh) / 2;
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
       }
-    );
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      // Map 1 full square copy across the front 180° hemisphere facing the camera
+      tex.repeat.set(1.65, 1);
+      tex.offset.set(0.08, 0);
+      tex.anisotropy = 16;
+      tex.needsUpdate = true;
+      setLoadedTexture(tex);
+    };
+    img.onerror = () => {
+      setLoadedTexture(fallbackTexture);
+    };
+    img.src = targetUrl;
   }, [theme.orbImageUrl, fallbackTexture]);
 
   useEffect(() => {
@@ -152,10 +167,10 @@ function AICore({
 
   useFrame((state) => {
     if (coreRef.current) {
-      baseScaleRef.current = THREE.MathUtils.lerp(baseScaleRef.current, hovered ? 0.82 : 1, 0.1);
+      baseScaleRef.current = THREE.MathUtils.lerp(baseScaleRef.current, hovered ? 0.88 : 1, 0.1);
 
       if (isRunning && mode === 'Work') {
-        const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 2) * 0.05;
+        const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 2) * 0.04;
         coreRef.current.scale.set(scale, scale, scale);
       } else if (isRunning && mode === 'Break') {
         const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 0.5) * 0.02;
@@ -164,10 +179,11 @@ function AICore({
         coreRef.current.scale.set(baseScaleRef.current, baseScaleRef.current, baseScaleRef.current);
       }
 
-      const spinSpeed = isRunning && mode === 'Work' ? 0.8 : 0.3;
-      coreRef.current.rotation.y = Math.sin(state.clock.elapsedTime * spinSpeed) * (Math.PI / 2);
+      const spinSpeed = isRunning && mode === 'Work' ? 0.65 : 0.28;
+      // Keep the front artwork facing the user with a smooth 3D sway instead of turning 90° to the seam
+      coreRef.current.rotation.y = Math.sin(state.clock.elapsedTime * spinSpeed) * 0.26;
       coreRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.3) * 0.05;
-      coreRef.current.position.y = Math.sin(state.clock.elapsedTime) * 0.1;
+      coreRef.current.position.y = Math.sin(state.clock.elapsedTime) * 0.08;
     }
   });
 
@@ -183,14 +199,14 @@ function AICore({
         <MeshDistortMaterial
           key={`${theme.id}-${loadedTexture.uuid}`}
           map={loadedTexture}
-          color={hovered ? '#ffffff' : '#f0f0f0'}
+          color={hovered ? '#ffffff' : '#f4f4f5'}
           attach="material"
-          distort={isRunning && mode === 'Work' ? 0.32 : 0.14}
-          speed={isRunning && mode === 'Work' ? 4.5 : isRunning && mode === 'Break' ? 1 : 2.2}
-          roughness={0.15}
-          metalness={0.78}
-          emissive="#222222"
-          emissiveIntensity={hovered ? 0.5 : 0.22}
+          distort={isRunning && mode === 'Work' ? 0.22 : 0.08}
+          speed={isRunning && mode === 'Work' ? 4.0 : isRunning && mode === 'Break' ? 1 : 1.8}
+          roughness={0.14}
+          metalness={0.68}
+          emissive="#1e1e24"
+          emissiveIntensity={hovered ? 0.45 : 0.2}
         />
       </Sphere>
       <TouchParticles trigger={clickTrigger} color={theme.particleColor} />
