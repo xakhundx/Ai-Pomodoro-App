@@ -35,6 +35,7 @@ export interface AppTheme {
   name: string;
   badge: string;
   interestPrompt: string;
+  isProCustom?: boolean;
   bgImageUrl?: string;
   orbImageUrl?: string;
   primary: string;
@@ -493,190 +494,258 @@ export const PRESET_THEMES: Record<string, AppTheme> = {
   }
 };
 
-export function resolveThemeFromPrompt(rawPrompt: string): AppTheme {
-  const input = (rawPrompt || '').trim();
+interface CustomUniverseKnowledge {
+  title: string;
+  badge: string;
+  powerLabel: string;
+  primary: string;
+  secondary: string;
+  accent: string;
+  bgPrompt: string;
+  orbPrompt: string;
+  characters: [
+    { name: string; role: string; quote: string },
+    { name: string; role: string; quote: string },
+    { name: string; role: string; quote: string }
+  ];
+}
+
+function getUniverseKnowledge(input: string): CustomUniverseKnowledge {
   const lower = input.toLowerCase();
 
-  if (!input || lower.includes('dragon') || lower.includes('dbz') || lower.includes('goku') || lower.includes('vegeta') || lower.includes('saiyan') || lower.includes('whis')) {
-    return PRESET_THEMES.dragonball;
-  }
-
-  if (
-    lower.includes('walking dead') ||
-    lower.includes('twd') ||
-    lower.includes('amc') ||
-    lower.includes('zombie') ||
-    lower.includes('apocalypse') ||
-    lower.includes('rick') ||
-    lower.includes('daryl') ||
-    lower.includes('carol') ||
-    lower.includes('negan') ||
-    lower.includes('survival') ||
-    lower.includes('last of us') ||
-    lower.includes('resident evil')
-  ) {
+  if (lower.includes('black clover') || lower.includes('asta') || lower.includes('yuno') || lower.includes('yami')) {
     return {
-      ...PRESET_THEMES.walkingdead,
-      interestPrompt: input,
+      title: 'Black Clover: Magic Knights',
+      badge: '🍀 Clover Kingdom',
+      powerLabel: 'MAGIC POWER',
+      primary: '#dc2626',
+      secondary: '#10b981',
+      accent: '#facc15',
+      bgPrompt: '4k anime landscape of Clover Kingdom royal capital castle and giant skull in Hage village at dramatic twilight, glowing grimoire magic particles, cinematic masterpiece, no text',
+      orbPrompt: 'high detail anime illustration of Asta with black anti-magic demon sword and Yuno with emerald wind spirit magic standing side by side, circular aura for 3D orb, no text',
+      characters: [
+        { name: 'Captain Yami', role: 'Mentor', quote: 'Push past your limits right here, right now!' },
+        { name: 'Yuno', role: 'Rival', quote: 'I will become the Wizard King—try not to fall behind!' },
+        { name: 'Asta', role: 'Optimist', quote: 'My magic is NEVER GIVING UP!! Let\'s smash this task!' },
+      ],
     };
   }
 
-  if (
-    lower.includes('cyber') ||
-    lower.includes('edgerunner') ||
-    lower.includes('2077') ||
-    lower.includes('lucy') ||
-    lower.includes('david') ||
-    lower.includes('sci-fi') ||
-    lower.includes('scifi') ||
-    lower.includes('matrix') ||
-    lower.includes('neon') ||
-    lower.includes('hacker') ||
-    lower.includes('tech') ||
-    lower.includes('futur') ||
-    lower.includes('space')
-  ) {
+  if (lower.includes('last of us') || lower.includes('tlou') || lower.includes('joel') || lower.includes('ellie')) {
     return {
-      ...PRESET_THEMES.cyberpunk,
-      interestPrompt: input,
+      title: 'The Last of Us (Fireflies)',
+      badge: '🌿 Firefly Survival',
+      powerLabel: 'SURVIVAL RATING',
+      primary: '#16a34a',
+      secondary: '#ca8a04',
+      accent: '#fde047',
+      bgPrompt: '4k cinematic overgrown post-apocalyptic city skyline reclaimed by lush green nature and golden sunlight, giraffes in distance, The Last of Us concept art, no text',
+      orbPrompt: 'cinematic illustration of rugged bearded survivor man Joel and young survivor girl Ellie with bow and guitar standing together in golden spore light, centered circular composition, no text',
+      characters: [
+        { name: 'Joel Miller', role: 'Protector', quote: 'Endure and survive. Keep your focus steady on the next objective.' },
+        { name: 'Tess', role: 'Strategist', quote: 'Stick to the plan and clear the path ahead.' },
+        { name: 'Ellie', role: 'Survivor', quote: 'Look for the light—another task down!' },
+      ],
     };
   }
 
-  if (
-    lower.includes('naruto') ||
-    lower.includes('shinobi') ||
-    lower.includes('ninja') ||
-    lower.includes('chakra') ||
-    lower.includes('anime') ||
-    lower.includes('one piece') ||
-    lower.includes('bleach') ||
-    lower.includes('jujutsu') ||
-    lower.includes('demon slayer') ||
-    lower.includes('attack on titan')
-  ) {
+  if (lower.includes('one piece') || lower.includes('luffy') || lower.includes('zoro')) {
     return {
-      ...PRESET_THEMES.shinobi,
-      interestPrompt: input,
+      title: 'One Piece: Grand Line',
+      badge: '🏴‍☠️ Straw Hat Crew',
+      powerLabel: 'BOUNTY LEVEL',
+      primary: '#ef4444',
+      secondary: '#f59e0b',
+      accent: '#38bdf8',
+      bgPrompt: '4k anime illustration of Thousand Sunny pirate ship sailing across glowing Wano Country cherry blossom ocean at sunset, epic clouds, no text',
+      orbPrompt: 'high detail anime art of Gear 5 Luffy with white clouds and Roronoa Zoro with three green Haki swords side by side, circular energy vortex, no text',
+      characters: [
+        { name: 'Shanks', role: 'Mentor', quote: 'Bet your focus on the new era and stay calm under pressure!' },
+        { name: 'Roronoa Zoro', role: 'Rival', quote: 'Nothing happened... except another task sliced in half!' },
+        { name: 'Monkey D. Luffy', role: 'Captain', quote: 'GEAR FIFTH!! I\'m gonna be King of Productivity!' },
+      ],
     };
   }
 
-  if (
-    lower.includes('elden') ||
-    lower.includes('fantasy') ||
-    lower.includes('dark souls') ||
-    lower.includes('medieval') ||
-    lower.includes('knight') ||
-    lower.includes('rpg') ||
-    lower.includes('witcher') ||
-    lower.includes('skyrim')
-  ) {
+  if (lower.includes('jujutsu') || lower.includes('jjk') || lower.includes('gojo') || lower.includes('sukuna')) {
     return {
-      ...PRESET_THEMES.fantasy,
-      interestPrompt: input,
+      title: 'Jujutsu Kaisen: Domain Expansion',
+      badge: '🤞 Infinite Void',
+      powerLabel: 'CURSED ENERGY',
+      primary: '#3b82f6',
+      secondary: '#e11d48',
+      accent: '#a855f7',
+      bgPrompt: '4k anime background of Infinite Void cosmic domain expansion colliding with Malevolent Shrine under a neon Tokyo night sky, no text',
+      orbPrompt: 'high detail anime illustration of Satoru Gojo with glowing six eyes Hollow Purple and Sukuna with crimson flames side by side, circular composition, no text',
+      characters: [
+        { name: 'Satoru Gojo', role: 'Special Grade', quote: 'Throughout Heaven and Earth, you alone are the focused one!' },
+        { name: 'Ryomen Sukuna', role: 'King of Curses', quote: 'Stand proud—you cleaved that task in two!' },
+        { name: 'Yuji Itadori', role: 'Black Flash', quote: 'BLACK FLASH!! +1,000 Cursed Energy locked in!' },
+      ],
     };
   }
 
-  // Dynamic Custom Theme generator for any other interest the user types
+  if (lower.includes('solo leveling') || lower.includes('jin-woo') || lower.includes('jinwoo')) {
+    return {
+      title: 'Solo Leveling: Shadow Monarch',
+      badge: '🗡️ Arise',
+      powerLabel: 'HUNTER RANK XP',
+      primary: '#7c3aed',
+      primaryGlow: 'rgba(124, 58, 237, 0.65)',
+      secondary: '#2563eb',
+      accent: '#38bdf8',
+      bgPrompt: '4k anime dark fantasy dungeon throne room glowing with violet shadow monarch aura and blue system windows, Solo Leveling style, no text',
+      orbPrompt: 'high detail anime illustration of Sung Jin-Woo with glowing purple daggers and shadow knight Igris behind him, circular aura, no text',
+      characters: [
+        { name: 'Sung Jin-Woo', role: 'Monarch', quote: 'ARISE. Another quest cleared for the Shadow Army.' },
+        { name: 'Igris', role: 'Commander', quote: 'My liege, the target objective has been vanquished.' },
+        { name: 'Beru', role: 'General', quote: 'KIEEEEEK! None can rival your productivity, my King!' },
+      ] as any,
+    };
+  }
+
+  if (lower.includes('attack on titan') || lower.includes('aot') || lower.includes('levi') || lower.includes('eren')) {
+    return {
+      title: 'Attack on Titan: Survey Corps',
+      badge: '⚔️ Wings of Freedom',
+      powerLabel: 'CORPS HONOR',
+      primary: '#10b981',
+      secondary: '#dc2626',
+      accent: '#f59e0b',
+      bgPrompt: '4k anime landscape of Wall Maria and Shiganshina district at dramatic golden sunset with Survey Corps green flares in sky, no text',
+      orbPrompt: 'high detail anime illustration of Captain Levi Ackerman with ODM blades and Eren Yeager with glowing green eyes side by side, circular frame, no text',
+      characters: [
+        { name: 'Captain Levi', role: 'Captain', quote: 'Make a choice you won\'t regret—finish that task cleanly.' },
+        { name: 'Eren Yeager', role: 'Vanguard', quote: 'Keep moving forward until every task is destroyed!' },
+        { name: 'Erwin Smith', role: 'Commander', quote: 'SHINZOU WO SASAGEYO! Dedicate your heart to this focus session!' },
+      ],
+    };
+  }
+
+  // Generic intelligent universe builder for ANY custom prompt!
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     hash = input.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hue = Math.abs(hash) % 360;
-  const secondaryHue = (hue + 45) % 360;
-  const accentHue = (hue + 160) % 360;
+  const secondaryHue = (hue + 50) % 360;
+  const accentHue = (hue + 150) % 360;
+  const displayTitle = input.charAt(0).toUpperCase() + input.slice(1);
 
-  const primary = `hsl(${hue}, 82%, 58%)`;
-  const primaryGlow = `hsla(${hue}, 82%, 58%, 0.65)`;
-  const secondary = `hsl(${secondaryHue}, 80%, 52%)`;
-  const accent = `hsl(${accentHue}, 85%, 60%)`;
+  return {
+    title: `${displayTitle} Universe`,
+    badge: `✨ ${displayTitle}`,
+    powerLabel: `${displayTitle.toUpperCase()} POWER`,
+    primary: `hsl(${hue}, 82%, 58%)`,
+    secondary: `hsl(${secondaryHue}, 80%, 52%)`,
+    accent: `hsl(${accentHue}, 85%, 60%)`,
+    bgPrompt: `ultra detailed 4k cinematic widescreen environment background inspired by ${displayTitle}, epic lighting, atmospheric depth, masterpiece concept art, no text`,
+    orbPrompt: `high detail iconic main characters and heroes from ${displayTitle} standing side by side surrounded by glowing energy aura, centered circular composition for 3D orb, masterpiece, no text`,
+    characters: [
+      { name: `${displayTitle} Grandmaster`, role: 'Mentor', quote: `Masterful execution in true ${displayTitle} style!` },
+      { name: `${displayTitle} Rival`, role: 'Rival', quote: `Push harder—show your true ${displayTitle} power!` },
+      { name: `${displayTitle} Champion`, role: 'Optimist', quote: `Phenomenal work! Your ${displayTitle} streak is unstoppable!` },
+    ],
+  };
+}
+
+export function resolveThemeFromPrompt(rawPrompt: string): AppTheme {
+  const input = (rawPrompt || '').trim();
+  const lower = input.toLowerCase();
+
+  if (!input || lower === 'dragon ball' || lower === 'dbz' || lower === 'dragonball') {
+    return PRESET_THEMES.dragonball;
+  }
+
+  if (
+    lower === "amc's the walking dead" ||
+    lower === 'the walking dead' ||
+    lower === 'walking dead' ||
+    lower === 'twd'
+  ) {
+    return PRESET_THEMES.walkingdead;
+  }
+
+  if (
+    lower === 'cyberpunk / sci-fi' ||
+    lower === 'cyberpunk' ||
+    lower === 'cyberpunk: edgerunners' ||
+    lower === 'cyberpunk 2077'
+  ) {
+    return PRESET_THEMES.cyberpunk;
+  }
+
+  if (lower === 'naruto / shinobi' || lower === 'naruto' || lower === 'shinobi') {
+    return PRESET_THEMES.shinobi;
+  }
+
+  if (lower === 'dark fantasy / rpg' || lower === 'elden ring' || lower === 'dark fantasy') {
+    return PRESET_THEMES.fantasy;
+  }
+
+  // Dynamic Custom AI Theme Generation for ANY custom user prompt!
+  const lore = getUniverseKnowledge(input);
+  const seed = Math.abs(
+    input.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
+  );
+
+  const dynamicBgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+    lore.bgPrompt
+  )}?width=1920&height=1080&seed=${seed}&nologo=true`;
+
+  const dynamicOrbUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(
+    lore.orbPrompt
+  )}?width=1024&height=1024&seed=${seed + 7}&nologo=true`;
 
   const displayTitle = input.charAt(0).toUpperCase() + input.slice(1);
 
   return {
     id: `custom-${lower.replace(/[^a-z0-9]/g, '-')}`,
-    name: `${displayTitle} Mode`,
-    badge: `✨ ${displayTitle}`,
+    name: lore.title,
+    badge: lore.badge,
     interestPrompt: input,
-    bgImageUrl: topArenaBg,
-    orbImageUrl: undefined,
-    primary,
-    primaryGlow,
-    secondary,
-    accent,
-    bgOverlay: 'rgba(10, 14, 28, 0.55)',
-    bgCssGradient: `radial-gradient(circle at 50% 25%, hsl(${hue}, 55%, 18%) 0%, hsl(${secondaryHue}, 45%, 10%) 60%, #05070f 100%)`,
-    coreColor: primary,
-    coreEmissive: secondary,
-    particleColor: accent,
-    powerLabel: `${displayTitle.toUpperCase()} POWER`,
-    personas: [
-      {
-        id: 'Mentor',
-        label: `${displayTitle} Strategist (Mentor)`,
-        characterName: `${displayTitle} Mentor`,
-        systemPrompt: `[You are a wise, inspiring mentor themed around "${displayTitle}". Use subtle references and metaphors from ${displayTitle} to motivate the user.]`,
-        greeting: (name) => `Welcome to your custom ${displayTitle} workspace, ${name}! Ready to conquer your tasks today?`,
-        taskCompleteQuotes: [
-          `Masterful work! +1,000 ${displayTitle} Power added to your rank!`,
-          `Another task cleared in true ${displayTitle} style! Keep the streak alive!`,
-          `Outstanding focus. Your momentum is unstoppable.`
-        ],
-        workFocusQuotes: [
-          `Channel the spirit of ${displayTitle} and tackle your top priority task first.`,
-          `Stay locked in—every completed task awards +1,000 Power!`
-        ],
-        breakQuotes: [
-          `Great session! Take a well-deserved break and recharge.`
-        ],
-        over9000Quote: (name) => `INCREDIBLE, ${name}! You've reached 9,000 ${displayTitle} Power—true legend status unlocked!`
-      },
-      {
-        id: 'Rival',
-        label: `${displayTitle} Challenger (Rival)`,
-        characterName: `${displayTitle} Rival`,
-        systemPrompt: `[You are a competitive, intense rival from the world of "${displayTitle}". Push the user to work harder and reach 9,000 power.]`,
-        greeting: (name) => `Show me what you've got, ${name}! Let's see how fast you can clear this ${displayTitle} task list!`,
-        taskCompleteQuotes: [
-          `Not bad! +1,000 Power—keep pushing until you hit 9,000!`,
-          `That task is history! Who's next on the list?`,
-          `Strong move! Don't let your guard down now!`
-        ],
-        workFocusQuotes: [
-          `No distractions! Attack the hardest task on your list right now!`,
-          `Push your limits while the timer is ticking!`
-        ],
-        breakQuotes: [
-          `Catch your breath quickly—the next round starts soon!`
-        ],
-        over9000Quote: (name) => `UNBELIEVABLE! Over 9,000 ${displayTitle} Power, ${name}! You really proved yourself!`
-      },
-      {
-        id: 'Optimist',
-        label: `${displayTitle} Champion (Hype)`,
-        characterName: `${displayTitle} Hype`,
-        systemPrompt: `[You are an ultra-enthusiastic fan and champion of "${displayTitle}", cheering the user on with high energy!]`,
-        greeting: (name) => `LET'S GO, ${name}! ${displayTitle} Mode is LIVE! Let's rack up those +1,000 Power tasks!`,
-        taskCompleteQuotes: [
-          `BOOM! +1,000 Power! You are crushing this ${displayTitle} session!`,
-          `YES!! Another task checked off! Keep that energy up!`,
-          `Unstoppable! 9,000 Power is getting closer!`
-        ],
-        workFocusQuotes: [
-          `Full speed ahead! Let's make this focus block legendary!`,
-          `You've got this! Pick a task and dive right in!`
-        ],
-        breakQuotes: [
-          `Awesome work! Relax, stretch, and enjoy your break!`
-        ],
-        over9000Quote: (name) => `LET'S GOOO!! ${name} just hit 9,000 ${displayTitle} Power!! Absolute legend!!`
-      }
-    ],
+    isProCustom: true,
+    bgImageUrl: dynamicBgUrl,
+    orbImageUrl: dynamicOrbUrl,
+    primary: lore.primary,
+    primaryGlow: lore.primary.startsWith('hsl')
+      ? lore.primary.replace('hsl(', 'hsla(').replace(')', ', 0.65)')
+      : 'rgba(168, 85, 247, 0.65)',
+    secondary: lore.secondary,
+    accent: lore.accent,
+    bgOverlay: 'rgba(10, 14, 28, 0.46)',
+    bgCssGradient: `radial-gradient(circle at 50% 25%, #1e1b4b 0%, #05070f 100%)`,
+    coreColor: lore.primary,
+    coreEmissive: lore.secondary,
+    particleColor: lore.accent,
+    powerLabel: lore.powerLabel,
+    personas: lore.characters.map((char, idx) => ({
+      id: idx === 0 ? 'Mentor' : idx === 1 ? 'Rival' : 'Optimist',
+      label: `${char.name} (${char.role})`,
+      characterName: char.name,
+      systemPrompt: `[You are ${char.name} from ${displayTitle}. Speak authentically in character and motivate the user!]`,
+      greeting: (name) => `Welcome to ${lore.title}, ${name}! I am ${char.name}. Ready to conquer your tasks today?`,
+      taskCompleteQuotes: [
+        `${char.quote} (+1,000 ${lore.powerLabel})`,
+        `Outstanding execution! Your ${lore.powerLabel} is surging!`,
+        `Another objective cleared in true ${displayTitle} fashion!`,
+      ],
+      workFocusQuotes: [
+        `${char.quote} Lock in on your top priority task!`,
+        `Channel the spirit of ${displayTitle}—every completed task awards +1,000 Power!`,
+      ],
+      breakQuotes: [
+        `Well earned rest! Recharge your energy before the next round in ${lore.title}.`,
+      ],
+      over9000Quote: (name) =>
+        `UNBELIEVABLE, ${name}!! You've surpassed 9,000 ${lore.powerLabel} in ${lore.title}!!`,
+    })),
     milestones: [
-      { threshold: 1000, id: `cust-1k`, title: `${displayTitle} Initiate`, subtitle: '1,000 Power — First task conquered!', icon: '🌟' },
-      { threshold: 3000, id: `cust-3k`, title: `Rising ${displayTitle} Pro`, subtitle: '3,000 Power — Momentum is building fast!', icon: '🔥' },
-      { threshold: 5000, id: `cust-5k`, title: `${displayTitle} Vanguard`, subtitle: '5,000 Power — Over halfway to 9,000!', icon: '⚡' },
-      { threshold: 9000, id: `cust-9k`, title: `OVER 9,000 ${displayTitle.toUpperCase()} POWER!`, subtitle: '9,000 Power Unlocked — Legendary Mastery Achieved!', icon: '🏆', isMajor: true },
-      { threshold: 15000, id: `cust-15k`, title: `Grandmaster of ${displayTitle}`, subtitle: '15,000 Power — Supreme Productivity Icon!', icon: '👑', isMajor: true },
-    ]
+      { threshold: 1000, id: `cust-${seed}-1k`, title: `${displayTitle} Awakened`, subtitle: `1,000 ${lore.powerLabel} — First mission cleared!`, icon: '🌟' },
+      { threshold: 3000, id: `cust-${seed}-3k`, title: `Rising ${displayTitle} Star`, subtitle: `3,000 ${lore.powerLabel} — Momentum surging!`, icon: '🔥' },
+      { threshold: 5000, id: `cust-${seed}-5k`, title: `${displayTitle} Vanguard`, subtitle: `5,000 ${lore.powerLabel} — Over halfway to 9,000!`, icon: '⚡' },
+      { threshold: 9000, id: `cust-${seed}-9k`, title: `OVER 9,000 ${lore.powerLabel}!`, subtitle: `9,000 ${lore.powerLabel} Unlocked — Supreme ${displayTitle} Legend!`, icon: '🏆', isMajor: true },
+      { threshold: 15000, id: `cust-${seed}-15k`, title: `Mythic Icon of ${displayTitle}`, subtitle: `15,000 ${lore.powerLabel} — Unstoppable Mastery!`, icon: '👑', isMajor: true },
+    ],
   };
 }

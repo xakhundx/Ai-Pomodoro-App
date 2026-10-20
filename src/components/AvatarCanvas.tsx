@@ -1,6 +1,6 @@
 import React, { Suspense, useRef, useState, useEffect, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text, useTexture } from '@react-three/drei';
+import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text } from '@react-three/drei';
 import * as THREE from 'three';
 import gokuImage from '../assets/goku_vegeta.png';
 import { AppTheme, PRESET_THEMES } from '../themes/themeEngine';
@@ -70,7 +70,7 @@ function createProceduralThemeTexture(theme: AppTheme): THREE.CanvasTexture {
 
   ctx.strokeStyle = theme.accent;
   ctx.lineWidth = 3;
-  ctx.globalAlpha = 0.35;
+  ctx.globalAlpha = 0.4;
   for (let i = 0; i < 14; i++) {
     ctx.beginPath();
     const y = (i / 14) * 512;
@@ -81,11 +81,18 @@ function createProceduralThemeTexture(theme: AppTheme): THREE.CanvasTexture {
 
   const radial = ctx.createRadialGradient(256, 256, 20, 256, 256, 220);
   radial.addColorStop(0, '#ffffff');
-  radial.addColorStop(0.3, theme.accent);
+  radial.addColorStop(0.35, theme.accent);
   radial.addColorStop(1, 'transparent');
-  ctx.globalAlpha = 0.45;
+  ctx.globalAlpha = 0.5;
   ctx.fillStyle = radial;
   ctx.fillRect(0, 0, 512, 512);
+
+  // Add theme badge emblem text on procedural fallback
+  ctx.globalAlpha = 0.9;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 34px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(theme.interestPrompt.toUpperCase().slice(0, 14), 256, 268);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -109,22 +116,33 @@ function AICore({
   const [hovered, setHover] = useState(false);
   const [clickTrigger, setClickTrigger] = useState(0);
 
-  const orbTexture = useTexture(theme.orbImageUrl || gokuImage);
+  const fallbackTexture = useMemo(() => createProceduralThemeTexture(theme), [theme]);
+  const [loadedTexture, setLoadedTexture] = useState<THREE.Texture>(fallbackTexture);
 
   useEffect(() => {
-    orbTexture.colorSpace = THREE.SRGBColorSpace;
-    orbTexture.wrapS = THREE.RepeatWrapping;
-    orbTexture.wrapT = THREE.ClampToEdgeWrapping;
-    orbTexture.repeat.set(-2, 1);
-    orbTexture.offset.set(1.5, 0);
-    orbTexture.anisotropy = 16;
-    orbTexture.needsUpdate = true;
-  }, [orbTexture]);
-
-  const customTexture = useMemo(() => {
-    if (theme.orbImageUrl) return null;
-    return createProceduralThemeTexture(theme);
-  }, [theme]);
+    setLoadedTexture(fallbackTexture);
+    const targetUrl = theme.orbImageUrl || gokuImage;
+    const loader = new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(
+      targetUrl,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.ClampToEdgeWrapping;
+        tex.repeat.set(-2, 1);
+        tex.offset.set(1.5, 0);
+        tex.anisotropy = 16;
+        tex.needsUpdate = true;
+        setLoadedTexture(tex);
+      },
+      undefined,
+      () => {
+        // Keep high-res procedural fallback if remote texture fails
+        setLoadedTexture(fallbackTexture);
+      }
+    );
+  }, [theme.orbImageUrl, fallbackTexture]);
 
   useEffect(() => {
     if (burstTrigger > 0) {
@@ -153,8 +171,6 @@ function AICore({
     }
   });
 
-  const activeMap = theme.orbImageUrl ? orbTexture : customTexture;
-
   return (
     <group>
       <Sphere
@@ -165,15 +181,15 @@ function AICore({
         onPointerDown={() => setClickTrigger(prev => prev + 1)}
       >
         <MeshDistortMaterial
-          key={theme.id}
-          map={activeMap}
-          color={hovered ? '#ffffff' : theme.orbImageUrl ? '#f0f0f0' : theme.coreColor}
+          key={`${theme.id}-${loadedTexture.uuid}`}
+          map={loadedTexture}
+          color={hovered ? '#ffffff' : '#f0f0f0'}
           attach="material"
           distort={isRunning && mode === 'Work' ? 0.32 : 0.14}
           speed={isRunning && mode === 'Work' ? 4.5 : isRunning && mode === 'Break' ? 1 : 2.2}
           roughness={0.15}
           metalness={0.78}
-          emissive={theme.orbImageUrl ? '#222222' : theme.coreEmissive}
+          emissive="#222222"
           emissiveIntensity={hovered ? 0.5 : 0.22}
         />
       </Sphere>

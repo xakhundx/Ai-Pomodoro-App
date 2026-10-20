@@ -18,13 +18,17 @@ interface UserProfile {
   lastActive: string;
 }
 
-interface FeedbackEntry {
+interface AdminNotification {
   id: string;
+  type: 'feedback' | 'survey' | 'new_user';
   nickname: string;
   gmail: string;
-  rating: number;
+  rating?: number;
+  favoriteTheme?: string;
+  featureRequest?: string;
   message: string;
   createdAt: string;
+  read: boolean;
 }
 
 interface MusicPreset {
@@ -58,24 +62,53 @@ const MUSIC_PRESETS: MusicPreset[] = [
 function convertToMusicEmbedUrl(rawUrl: string): string | null {
   const url = rawUrl.trim();
   if (!url) return null;
-
-  // Already an embed URL
   if (url.includes('open.spotify.com/embed/') || url.includes('embed.music.apple.com/')) {
     return url;
   }
-
-  // Convert standard Spotify link: https://open.spotify.com/playlist/xyz -> https://open.spotify.com/embed/playlist/xyz
   if (url.includes('open.spotify.com/')) {
     const clean = url.split('?')[0];
     return clean.replace('open.spotify.com/', 'open.spotify.com/embed/') + '?utm_source=generator&theme=0';
   }
-
-  // Convert standard Apple Music link: https://music.apple.com/... -> https://embed.music.apple.com/...
   if (url.includes('music.apple.com/')) {
     return url.replace('music.apple.com/', 'embed.music.apple.com/');
   }
-
   return null;
+}
+
+/**
+ * Sends real email notifications to ammar.akhund2017@gmail.com via FormSubmit AJAX
+ * and optional Google Apps Script webhook.
+ */
+async function sendEmailToOwner(
+  subject: string,
+  payload: Record<string, string | number>,
+  webhookUrl?: string
+) {
+  try {
+    await fetch(`https://formsubmit.co/ajax/${APP_CONFIG.OWNER_EMAIL}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({
+        _subject: subject,
+        _template: 'box',
+        ...payload,
+      }),
+    });
+  } catch {
+    // Non-blocking fallback
+  }
+
+  if (webhookUrl) {
+    fetch(webhookUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  }
 }
 
 function App() {
@@ -104,6 +137,34 @@ function App() {
   const isOwner =
     userProfile?.gmail?.trim().toLowerCase() === APP_CONFIG.OWNER_EMAIL.toLowerCase();
 
+  // Admin Notifications Inbox State (for Ammar Akhund)
+  const [adminNotifications, setAdminNotifications] = useState<AdminNotification[]>(() => {
+    const saved = localStorage.getItem('pomodoro-admin-notifications');
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return [];
+    }
+  });
+  const [showAdminInboxModal, setShowAdminInboxModal] = useState(false);
+
+  const addAdminNotification = (notif: Omit<AdminNotification, 'id' | 'createdAt' | 'read'>) => {
+    const fullNotif: AdminNotification = {
+      ...notif,
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      createdAt: new Date().toLocaleString(),
+      read: false,
+    };
+    setAdminNotifications(prev => {
+      const updated = [fullNotif, ...prev];
+      localStorage.setItem('pomodoro-admin-notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const unreadAdminCount = adminNotifications.filter(n => !n.read).length;
+
   // Onboarding Form Inputs
   const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(() => !userProfile);
   const [nicknameInput, setNicknameInput] = useState(userProfile?.nickname || '');
@@ -116,36 +177,106 @@ function App() {
   // Active Modals & Docks
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [showGoogleSurveyModal, setShowGoogleSurveyModal] = useState(false);
   const [showAchievementsModal, setShowAchievementsModal] = useState(false);
   const [showUsersModal, setShowUsersModal] = useState(false);
   const [showMusicDock, setShowMusicDock] = useState(false);
   const [showReminderSyncModal, setShowReminderSyncModal] = useState(false);
   const [showProModal, setShowProModal] = useState(false);
 
-  // Pro Tier Status
+  // Real-time AI Theme Synthesis Loading Overlay
+  const [isGeneratingTheme, setIsGeneratingTheme] = useState(false);
+  const [themeGenStage, setThemeGenStage] = useState('');
+  const [themeGenProgress, setThemeGenProgress] = useState(0);
+  const [welcomeThemeBanner, setWelcomeThemeBanner] = useState<string | null>(null);
+
+  // Pro Tier Status & Stripe URL Return Check
   const [isProMember, setIsProMember] = useState<boolean>(() => {
     return localStorage.getItem('pomodoro-pro-member') === 'true';
   });
+  const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string>(
+    () => localStorage.getItem('pomodoro-stripe-url') || APP_CONFIG.PRO_CHECKOUT_URL
+  );
 
-  // Music Hub State
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('pro') === 'success') {
+      setIsProMember(true);
+      localStorage.setItem('pomodoro-pro-member', 'true');
+      setWelcomeThemeBanner('🎉 Welcome to Focus Arena PRO! All custom AI worlds & features are unlocked!');
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // 1-Click Music Play / Pause Engine + Spotify Sync
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [activeMusicEmbed, setActiveMusicEmbed] = useState<string>(() => {
     return localStorage.getItem('pomodoro-music-embed') || MUSIC_PRESETS[0].embedUrl;
   });
   const [customMusicUrlInput, setCustomMusicUrlInput] = useState('');
   const [musicError, setMusicError] = useState('');
+  const [spotifyAppSyncStatus, setSpotifyAppSyncStatus] = useState<string>('Synced with System Media');
+  const ambientAudioCtxRef = useRef<AudioContext | null>(null);
+  const ambientGainRef = useRef<GainNode | null>(null);
+
+  // Toggle Music ON/OFF directly when clicking the top-bar Music button!
+  const handleToggleMusicButton = () => {
+    const nextPlaying = !isMusicPlaying;
+    setIsMusicPlaying(nextPlaying);
+
+    try {
+      if (nextPlaying) {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          if (!ambientAudioCtxRef.current) {
+            const ctx = new AudioContextClass();
+            ambientAudioCtxRef.current = ctx;
+
+            // Create warm binaural focus drone (432Hz + 216Hz + 324Hz)
+            const masterGain = ctx.createGain();
+            masterGain.gain.setValueAtTime(0.04, ctx.currentTime);
+            masterGain.connect(ctx.destination);
+            ambientGainRef.current = masterGain;
+
+            [216, 324, 432].forEach(freq => {
+              const osc = ctx.createOscillator();
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(freq, ctx.currentTime);
+              osc.connect(masterGain);
+              osc.start();
+            });
+          } else if (ambientAudioCtxRef.current.state === 'suspended') {
+            ambientAudioCtxRef.current.resume();
+          }
+        }
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+      } else {
+        if (ambientAudioCtxRef.current && ambientAudioCtxRef.current.state === 'running') {
+          ambientAudioCtxRef.current.suspend();
+        }
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'paused';
+        }
+      }
+    } catch (e) {
+      console.warn('Music toggle warning:', e);
+    }
+  };
 
   // Post-Session Reminder & Calendar/OneNote Sync State
   const [sessionReminderText, setSessionReminderText] = useState<string>(
     () => localStorage.getItem('pomodoro-session-reminder') || ''
   );
+  const [reminderDraftInput, setReminderDraftInput] = useState<string>(
+    () => localStorage.getItem('pomodoro-session-reminder') || ''
+  );
+  const [reminderConfirmMsg, setReminderConfirmMsg] = useState<string>('');
   const [reminderAlertBanner, setReminderAlertBanner] = useState<string | null>(null);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string>('');
 
-  useEffect(() => {
-    localStorage.setItem('pomodoro-session-reminder', sessionReminderText);
-  }, [sessionReminderText]);
-
-  // Webhook URL state (configurable by Owner in Admin Panel)
+  // Webhook URL state
   const [webhookUrl, setWebhookUrl] = useState<string>(
     () => localStorage.getItem('pomodoro-webhook-url') || APP_CONFIG.USER_TRACKING_WEBHOOK_URL
   );
@@ -188,7 +319,7 @@ function App() {
     });
   };
 
-  // Gamification & Power Level (starts at 0, +1,000 per completed task!)
+  // Gamification & Power Level
   const [assistantName, setAssistantName] = useState(
     () => localStorage.getItem('assistantName') || userProfile?.nickname || 'XAKHUNDX'
   );
@@ -214,18 +345,16 @@ function App() {
   const [currentToast, setCurrentToast] = useState<AchievementMilestone | null>(null);
   const [burstTrigger, setBurstTrigger] = useState(0);
 
-  // Google Form URL & Local Feedback State
-  const [customGoogleFormUrl, setCustomGoogleFormUrl] = useState(
-    () => localStorage.getItem('pomodoro-google-form-url') || APP_CONFIG.GOOGLE_FEEDBACK_FORM_URL
-  );
-  const [isConfiguringFormUrl, setIsConfiguringFormUrl] = useState(false);
+  // Feedback & Google-Forms-Style Survey State
   const [feedbackRating, setFeedbackRating] = useState(5);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
-  const [feedbackList, setFeedbackList] = useState<FeedbackEntry[]>(() => {
-    const saved = localStorage.getItem('pomodoro-feedback-entries');
-    return saved ? JSON.parse(saved) : [];
-  });
+
+  const [surveyRating, setSurveyRating] = useState(5);
+  const [surveyFavTheme, setSurveyFavTheme] = useState('Dragon Ball Super');
+  const [surveyThemeRequest, setSurveyThemeRequest] = useState('');
+  const [surveyComments, setSurveyComments] = useState('');
+  const [surveySubmitted, setSurveySubmitted] = useState(false);
 
   // Resolve current Persona object from activeTheme
   const currentPersona =
@@ -408,18 +537,22 @@ function App() {
     recognition.start();
   };
 
-  // Timer State
+  // Timer State (with explicit Minutes & Seconds support!)
   const [workDuration, setWorkDuration] = useState(() =>
     parseInt(localStorage.getItem('pomodoro-work-time') || '25', 10)
+  );
+  const [workSecondsExtra, setWorkSecondsExtra] = useState(() =>
+    parseInt(localStorage.getItem('pomodoro-work-secs') || '0', 10)
   );
   const [breakDuration, setBreakDuration] = useState(() =>
     parseInt(localStorage.getItem('pomodoro-break-time') || '5', 10)
   );
-  const [timeLeft, setTimeLeft] = useState(workDuration * 60);
+  const [timeLeft, setTimeLeft] = useState(workDuration * 60 + workSecondsExtra);
   const [isRunning, setIsRunning] = useState(false);
   const [mode, setMode] = useState<'Work' | 'Break'>('Work');
   const [isEditingTimer, setIsEditingTimer] = useState(false);
-  const [timerInput, setTimerInput] = useState('');
+  const [editMinsInput, setEditMinsInput] = useState('25');
+  const [editSecsInput, setEditSecsInput] = useState('0');
 
   // Panel Collapse States
   const [isLeftOpen, setIsLeftOpen] = useState(true);
@@ -448,32 +581,56 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('pomodoro-work-time', workDuration.toString());
+    localStorage.setItem('pomodoro-work-secs', workSecondsExtra.toString());
     localStorage.setItem('pomodoro-break-time', breakDuration.toString());
-  }, [workDuration, breakDuration]);
+  }, [workDuration, workSecondsExtra, breakDuration]);
 
   const handleTimerClick = () => {
     if (isRunning) return;
     setIsEditingTimer(true);
-    setTimerInput(Math.floor(timeLeft / 60).toString());
+    setEditMinsInput(Math.floor(timeLeft / 60).toString());
+    setEditSecsInput((timeLeft % 60).toString());
   };
 
   const handleTimerSubmit = () => {
     setIsEditingTimer(false);
-    const parsed = parseInt(timerInput, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      setTimeLeft(parsed * 60);
-      if (mode === 'Work') {
-        setWorkDuration(parsed);
-      } else {
-        setBreakDuration(parsed);
-      }
+    const parsedMins = Math.max(0, parseInt(editMinsInput, 10) || 0);
+    const parsedSecs = Math.max(0, Math.min(59, parseInt(editSecsInput, 10) || 0));
+    const totalSecs = Math.max(1, parsedMins * 60 + parsedSecs);
+    setTimeLeft(totalSecs);
+    if (mode === 'Work') {
+      setWorkDuration(Math.floor(totalSecs / 60));
+      setWorkSecondsExtra(totalSecs % 60);
+    } else {
+      setBreakDuration(Math.max(1, Math.floor(totalSecs / 60)));
     }
   };
 
-  const handleWorkChange = (val: number) => {
-    if (val < 1) val = 1;
-    setWorkDuration(val);
-    if (!isRunning && mode === 'Work') setTimeLeft(val * 60);
+  const handleQuickTimerSet = (mins: number, secs: number) => {
+    setIsRunning(false);
+    setIsEditingTimer(false);
+    const total = Math.max(1, mins * 60 + secs);
+    setTimeLeft(total);
+    if (mode === 'Work') {
+      setWorkDuration(mins);
+      setWorkSecondsExtra(secs);
+    }
+  };
+
+  const handleWorkMinChange = (val: number) => {
+    const cleanMin = Math.max(0, val);
+    setWorkDuration(cleanMin);
+    if (!isRunning && mode === 'Work') {
+      setTimeLeft(Math.max(1, cleanMin * 60 + workSecondsExtra));
+    }
+  };
+
+  const handleWorkSecChange = (val: number) => {
+    const cleanSec = Math.max(0, Math.min(59, val));
+    setWorkSecondsExtra(cleanSec);
+    if (!isRunning && mode === 'Work') {
+      setTimeLeft(Math.max(1, workDuration * 60 + cleanSec));
+    }
   };
 
   const handleBreakChange = (val: number) => {
@@ -513,11 +670,20 @@ function App() {
       } else {
         handleAIInteraction(`Break is over! Ready to jump back into Work mode.`);
         setMode('Work');
-        setTimeLeft(workDuration * 60);
+        setTimeLeft(Math.max(1, workDuration * 60 + workSecondsExtra));
       }
     }
     return () => clearInterval(interval);
-  }, [isRunning, timeLeft, mode, workDuration, breakDuration, powerLevel, sessionReminderText]);
+  }, [
+    isRunning,
+    timeLeft,
+    mode,
+    workDuration,
+    workSecondsExtra,
+    breakDuration,
+    powerLevel,
+    sessionReminderText,
+  ]);
 
   const toggleTimer = () => {
     if (!isRunning) playSound('hum');
@@ -527,7 +693,11 @@ function App() {
   const switchMode = (newMode: 'Work' | 'Break') => {
     setIsRunning(false);
     setMode(newMode);
-    setTimeLeft(newMode === 'Work' ? workDuration * 60 : breakDuration * 60);
+    setTimeLeft(
+      newMode === 'Work'
+        ? Math.max(1, workDuration * 60 + workSecondsExtra)
+        : breakDuration * 60
+    );
   };
 
   // Task Handlers
@@ -572,7 +742,6 @@ function App() {
     setTasks(tasks.filter(t => t.id !== id));
   };
 
-  // Clear All Tasks & Reset Power Level Handlers
   const handleClearAllTasks = () => {
     if (tasks.length === 0) return;
     setTasks([]);
@@ -639,7 +808,49 @@ function App() {
     }
   };
 
-  // Onboarding & Gmail Sign-In Handler + Automated Welcome Email Trigger
+  // Real-Time AI Theme Synthesis Pipeline (with animated progress & image preloading)
+  const triggerThemeGenerationWithLoading = (promptValue: string) => {
+    const clean = promptValue.trim() || 'Dragon Ball';
+    setThemePromptInput(clean);
+    const resolved = resolveThemeFromPrompt(clean);
+
+    // If it's a custom AI theme, show the real-time generation screen!
+    setIsGeneratingTheme(true);
+    setThemeGenProgress(15);
+    setThemeGenStage(`Analyzing universe lore & characters for "${clean}"...`);
+
+    setTimeout(() => {
+      setThemeGenProgress(45);
+      setThemeGenStage(`Synthesizing 4K Widescreen Environment (${resolved.name})...`);
+    }, 600);
+
+    setTimeout(() => {
+      setThemeGenProgress(78);
+      setThemeGenStage(
+        `Rendering 3D Orb Personas (${resolved.personas.map(p => p.characterName).join(', ')})...`
+      );
+    }, 1250);
+
+    setTimeout(() => {
+      setThemeGenProgress(100);
+      setActiveTheme(resolved);
+      if (userProfile) {
+        const updated = {
+          ...userProfile,
+          interestPrompt: clean,
+          lastActive: new Date().toISOString(),
+        };
+        setUserProfile(updated);
+        localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
+      }
+      setIsGeneratingTheme(false);
+      setWelcomeThemeBanner(`✨ Welcome to your Premium AI Theme: ${resolved.name}!`);
+      playSound('achievement');
+      setTimeout(() => setWelcomeThemeBanner(null), 5000);
+    }, 1900);
+  };
+
+  // Onboarding & Gmail Sign-In Handler + Automated Email Notification
   const handleOnboardingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanNickname = nicknameInput.trim();
@@ -656,6 +867,7 @@ function App() {
     }
 
     const now = new Date().toISOString();
+    const isNewUser = !userRegistry.some(u => u.gmail === cleanGmail);
     const newProfile: UserProfile = {
       nickname: cleanNickname,
       gmail: cleanGmail,
@@ -679,72 +891,105 @@ function App() {
     setUserRegistry(updatedRegistry);
     localStorage.setItem('pomodoro-user-registry', JSON.stringify(updatedRegistry));
 
-    // Trigger Google Apps Script Webhook for Automated Welcome Email + Sheet Logging
-    const targetWebhook = webhookUrl || APP_CONFIG.USER_TRACKING_WEBHOOK_URL;
-    if (targetWebhook) {
-      fetch(targetWebhook, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'signin',
-          ...newProfile,
-          owner: APP_CONFIG.OWNER_NAME,
-        }),
-      }).catch(() => {});
+    if (isNewUser) {
+      addAdminNotification({
+        type: 'new_user',
+        nickname: cleanNickname,
+        gmail: cleanGmail,
+        message: `New user signed in with theme interest: "${cleanPrompt}"`,
+      });
+
+      sendEmailToOwner(
+        `🚀 New Focus Arena User Sign-In: ${cleanNickname} (${cleanGmail})`,
+        {
+          Event: 'New User Sign-In',
+          Nickname: cleanNickname,
+          User_Gmail: cleanGmail,
+          Selected_Theme: cleanPrompt,
+          Timestamp: new Date().toLocaleString(),
+          _autoresponse: `Welcome to Focus Arena (AI Pomodoro) by Ammar Akhund! Thank you for signing in, ${cleanNickname}. Your custom ${cleanPrompt} workspace is ready. We appreciate your feedback anytime!`,
+        },
+        webhookUrl
+      );
     }
 
-    const resolved = resolveThemeFromPrompt(cleanPrompt);
-    setActiveTheme(resolved);
     setOnboardingError('');
     setShowOnboardingModal(false);
+    triggerThemeGenerationWithLoading(cleanPrompt);
   };
 
-  // Apply Theme from Theme Customizer Modal
-  const handleApplyThemePrompt = (promptValue: string) => {
-    const clean = promptValue.trim() || 'Dragon Ball';
-    setThemePromptInput(clean);
-    const resolved = resolveThemeFromPrompt(clean);
-    setActiveTheme(resolved);
-    if (userProfile) {
-      const updated = { ...userProfile, interestPrompt: clean, lastActive: new Date().toISOString() };
-      setUserProfile(updated);
-      localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
-    }
-  };
-
-  // Submit In-App Feedback (also forwards to Owner Email via Webhook!)
+  // Submit Instant 5-Star In-App Feedback
   const handleFeedbackSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!feedbackMessage.trim()) return;
-    const entry: FeedbackEntry = {
-      id: Date.now().toString(),
-      nickname: userProfile?.nickname || assistantName,
-      gmail: userProfile?.gmail || 'anonymous@gmail.com',
+    const senderName = userProfile?.nickname || assistantName;
+    const senderGmail = userProfile?.gmail || 'anonymous@gmail.com';
+
+    addAdminNotification({
+      type: 'feedback',
+      nickname: senderName,
+      gmail: senderGmail,
       rating: feedbackRating,
       message: feedbackMessage.trim(),
-      createdAt: new Date().toLocaleString(),
-    };
-    const nextList = [entry, ...feedbackList];
-    setFeedbackList(nextList);
-    localStorage.setItem('pomodoro-feedback-entries', JSON.stringify(nextList));
+    });
 
-    const targetWebhook = webhookUrl || APP_CONFIG.USER_TRACKING_WEBHOOK_URL;
-    if (targetWebhook) {
-      fetch(targetWebhook, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'feedback',
-          ...entry,
-        }),
-      }).catch(() => {});
-    }
+    sendEmailToOwner(
+      `⭐ New ${feedbackRating}/5 Feedback on Focus Arena from ${senderName}`,
+      {
+        Type: 'Instant In-App Feedback',
+        Nickname: senderName,
+        User_Gmail: senderGmail,
+        Star_Rating: `${feedbackRating} / 5 Stars`,
+        Feedback_Message: feedbackMessage.trim(),
+        Active_Theme: activeTheme.name,
+        Timestamp: new Date().toLocaleString(),
+      },
+      webhookUrl
+    );
 
     setFeedbackMessage('');
     setFeedbackSubmitted(true);
     setTimeout(() => setFeedbackSubmitted(false), 3500);
+  };
+
+  // Submit Full Google-Forms-Style Survey
+  const handleGoogleSurveySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const senderName = userProfile?.nickname || assistantName;
+    const senderGmail = userProfile?.gmail || 'anonymous@gmail.com';
+
+    addAdminNotification({
+      type: 'survey',
+      nickname: senderName,
+      gmail: senderGmail,
+      rating: surveyRating,
+      favoriteTheme: surveyFavTheme,
+      featureRequest: surveyThemeRequest,
+      message: surveyComments || `Requested Theme/Feature: ${surveyThemeRequest}`,
+    });
+
+    sendEmailToOwner(
+      `📋 Full Survey Response (${surveyRating}/5⭐) from ${senderName}`,
+      {
+        Type: 'Full Feedback Form Response',
+        Nickname: senderName,
+        User_Gmail: senderGmail,
+        Overall_Rating: `${surveyRating} / 5`,
+        Favorite_Theme: surveyFavTheme,
+        Requested_Themes_Or_Characters: surveyThemeRequest || 'None specified',
+        Detailed_Feedback: surveyComments || 'None specified',
+        Timestamp: new Date().toLocaleString(),
+      },
+      webhookUrl
+    );
+
+    setSurveyThemeRequest('');
+    setSurveyComments('');
+    setSurveySubmitted(true);
+    setTimeout(() => {
+      setSurveySubmitted(false);
+      setShowGoogleSurveyModal(false);
+    }, 2200);
   };
 
   // Calendar (.ics & Google Calendar) + Microsoft OneNote Sync Helpers
@@ -757,7 +1002,7 @@ function App() {
       }\n\nReminder after session: ${sessionReminderText || 'None'}`
     );
     const start = new Date();
-    const end = new Date(start.getTime() + workDuration * 60000);
+    const end = new Date(start.getTime() + (workDuration * 60 + workSecondsExtra) * 1000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${fmt(
       start
@@ -767,7 +1012,7 @@ function App() {
 
   const handleDownloadIcsCalendar = () => {
     const start = new Date();
-    const end = new Date(start.getTime() + workDuration * 60000);
+    const end = new Date(start.getTime() + (workDuration * 60 + workSecondsExtra) * 1000);
     const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
     const pendingTasks = tasks.filter(t => !t.completed).map(t => `- ${t.text}`).join('\\n');
     const icsContent = [
@@ -857,6 +1102,47 @@ function App() {
         />
       </div>
 
+      {/* Real-Time AI Theme Generation Processing Overlay */}
+      {isGeneratingTheme && (
+        <div className="modal-backdrop" style={{ zIndex: 90 }}>
+          <div className="modal-card" style={{ textAlign: 'center', alignItems: 'center' }}>
+            <div style={{ fontSize: '3rem', animation: 'float 1.5s infinite' }}>⚡</div>
+            <h2>Synthesizing Custom AI World...</h2>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--accent)', fontWeight: 700 }}>
+              {themeGenStage}
+            </p>
+            <div className="power-bar-track" style={{ height: '12px', marginTop: '8px' }}>
+              <div className="power-bar-fill" style={{ width: `${themeGenProgress}%` }} />
+            </div>
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              {themeGenProgress}% Complete — Building 4K Environment & 3D Orb Shaders
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome to Premium AI Theme Banner */}
+      {welcomeThemeBanner && (
+        <div className="achievement-toast major" style={{ zIndex: 75 }}>
+          <div style={{ fontSize: '2rem' }}>✨</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: '#fde047' }}>
+              CUSTOM AI WORLD READY
+            </div>
+            <div style={{ fontSize: '1rem', fontWeight: 900, color: '#fff' }}>
+              {welcomeThemeBanner}
+            </div>
+          </div>
+          <button
+            className="outline"
+            style={{ padding: '0.3rem 0.65rem', fontSize: '0.75rem' }}
+            onClick={() => setWelcomeThemeBanner(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Achievement Unlocked Banner (Queue Toast) */}
       {currentToast && (
         <div className={`achievement-toast ${currentToast.isMajor ? 'major' : ''}`}>
@@ -903,11 +1189,14 @@ function App() {
             </div>
           </div>
           <button
-            className="outline"
-            style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-            onClick={() => setReminderAlertBanner(null)}
+            onClick={() => {
+              setReminderAlertBanner(null);
+              setSessionReminderText('');
+              setReminderDraftInput('');
+            }}
+            style={{ padding: '0.45rem 0.85rem', fontSize: '0.8rem' }}
           >
-            Dismiss
+            ✓ Done
           </button>
         </div>
       )}
@@ -928,7 +1217,7 @@ function App() {
             {isOwner ? '👑 ' : '👤 '}
             {userProfile?.nickname || assistantName}
           </span>
-          {isProMember && (
+          {(isProMember || isOwner) && (
             <span
               style={{
                 background: 'linear-gradient(135deg, #facc15, #f97316)',
@@ -947,7 +1236,7 @@ function App() {
         <button
           className="nav-pill"
           onClick={() => setShowThemeModal(true)}
-          title="Customize App Theme by Interest"
+          title="Customize or Generate AI Theme by Interest"
         >
           🎨 {activeTheme.badge}
         </button>
@@ -976,28 +1265,53 @@ function App() {
           className="nav-pill"
           onClick={() => setShowFeedbackModal(true)}
           style={{ borderColor: 'var(--primary)' }}
-          title="Send Feedback to Ammar Akhund"
+          title="Open Feedback Form or Instant Rating"
         >
           💬 Feedback
         </button>
 
-        <button
-          className="nav-pill"
-          onClick={() => setShowMusicDock(!showMusicDock)}
-          style={{
-            borderColor: showMusicDock ? '#22c55e' : 'rgba(255,255,255,0.16)',
-          }}
-          title="Open Spotify / Apple Music / Lo-Fi Focus Player"
-        >
-          🎵 Music
-        </button>
+        {/* 1-Click Play/Pause Music Cell + Playlist Dock Chevron */}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+          <button
+            className="nav-pill"
+            onClick={handleToggleMusicButton}
+            style={{
+              borderRadius: '999px 0 0 999px',
+              borderColor: isMusicPlaying ? '#22c55e' : 'rgba(255,255,255,0.16)',
+              background: isMusicPlaying ? 'rgba(34, 197, 94, 0.22)' : 'rgba(255,255,255,0.06)',
+            }}
+            title="Click once to Play Focus Music; click again to Pause/Turn Off all music"
+          >
+            {isMusicPlaying ? '🔊 Music: ON' : '🎵 Music: OFF'}
+          </button>
+          <button
+            className="nav-pill"
+            onClick={() => setShowMusicDock(!showMusicDock)}
+            style={{
+              borderRadius: '0 999px 999px 0',
+              padding: '0.42rem 0.55rem',
+              borderLeft: 'none',
+              borderColor: showMusicDock ? 'var(--primary)' : 'rgba(255,255,255,0.16)',
+            }}
+            title="Open Spotify / Apple Music Playlist Hub"
+          >
+            🎧 ▾
+          </button>
+        </div>
 
         <button
           className="nav-pill"
-          onClick={() => setShowReminderSyncModal(true)}
+          onClick={() => {
+            setReminderDraftInput(sessionReminderText);
+            setReminderConfirmMsg('');
+            setShowReminderSyncModal(true);
+          }}
+          style={{
+            borderColor: sessionReminderText ? '#4ade80' : 'rgba(255,255,255,0.16)',
+          }}
           title="Set Post-Session Reminder & Sync with OneNote / Calendar"
         >
-          ⏰ {sessionReminderText ? 'Reminder Set' : 'Reminder & Sync'}
+          ⏰ {sessionReminderText ? `Reminder Set ✓` : 'Reminder & Sync'}
         </button>
 
         <button
@@ -1007,25 +1321,64 @@ function App() {
             background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.28), rgba(59, 130, 246, 0.25))',
             borderColor: '#facc15',
           }}
-          title="Explore Focus Arena Pro & Creator Info"
+          title="Explore Focus Arena Pro ($2.99/mo) & Custom AI Worlds"
         >
           💎 Pro
         </button>
+
+        {/* Owner-Only Notification Inbox Bar! */}
+        {isOwner && (
+          <button
+            className="nav-pill"
+            onClick={() => {
+              setShowAdminInboxModal(true);
+              setAdminNotifications(prev => {
+                const marked = prev.map(n => ({ ...n, read: true }));
+                localStorage.setItem('pomodoro-admin-notifications', JSON.stringify(marked));
+                return marked;
+              });
+            }}
+            style={{
+              background: unreadAdminCount > 0 ? 'rgba(239, 68, 68, 0.25)' : 'rgba(250, 204, 21, 0.15)',
+              borderColor: unreadAdminCount > 0 ? '#ef4444' : '#facc15',
+            }}
+            title="Owner-Only Admin Notification Inbox (View Feedback & User Sign-Ins)"
+          >
+            🔔 Admin Inbox
+            <span
+              style={{
+                background: unreadAdminCount > 0 ? '#ef4444' : 'rgba(255,255,255,0.2)',
+                color: '#fff',
+                fontSize: '0.68rem',
+                fontWeight: 900,
+                padding: '1px 6px',
+                borderRadius: '999px',
+              }}
+            >
+              {adminNotifications.length}
+            </span>
+          </button>
+        )}
       </div>
 
-      {/* Persistent Floating Music Dock (Keeps playing even when minimized!) */}
+      {/* Persistent Floating Music Dock */}
       <div className={`music-floating-dock ${showMusicDock ? '' : 'minimized'}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontWeight: 800, fontSize: '0.88rem' }}>
-            🎵 Live Music Hub (Spotify & Apple Music)
-          </span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '0.88rem' }}>
+              🎵 Spotify & Apple Music Hub
+            </div>
+            <div style={{ fontSize: '0.7rem', color: '#4ade80' }}>
+              ● {spotifyAppSyncStatus} {isMusicPlaying ? '(Ambient Synth Active)' : ''}
+            </div>
+          </div>
           <button
             type="button"
             className="outline"
             style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
             onClick={() => setShowMusicDock(false)}
           >
-            Minimize ▾
+            Done ▾
           </button>
         </div>
 
@@ -1047,7 +1400,9 @@ function App() {
           ))}
         </div>
 
+        {/* When Music is turned OFF via top bar button, unmount/pause iframe */}
         <iframe
+          key={isMusicPlaying ? 'playing-' + activeMusicEmbed : 'stopped-' + activeMusicEmbed}
           src={activeMusicEmbed}
           width="100%"
           height="152"
@@ -1062,7 +1417,7 @@ function App() {
           <input
             type="url"
             className="input-field"
-            placeholder="Paste any Spotify or Apple Music playlist/song link..."
+            placeholder="Paste Spotify or Apple Music playlist/song link..."
             value={customMusicUrlInput}
             onChange={e => setCustomMusicUrlInput(e.target.value)}
             style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem' }}
@@ -1078,12 +1433,17 @@ function App() {
               }
               setActiveMusicEmbed(converted);
               localStorage.setItem('pomodoro-music-embed', converted);
+              setSpotifyAppSyncStatus('Synced with Custom Playlist');
               setCustomMusicUrlInput('');
               setMusicError('');
             }}
           >
-            Load
+            Sync
           </button>
+        </div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+          Tip: Log into Spotify in your browser to hear full songs instead of 30s previews, or click{' '}
+          <strong>🔊 Music: ON</strong> in the top bar for instant Focus Synth!
         </div>
         {musicError && (
           <div style={{ color: '#fca5a5', fontSize: '0.72rem' }}>{musicError}</div>
@@ -1253,115 +1613,231 @@ function App() {
           </div>
         </div>
 
-        {/* Right Panel: Pomodoro Timer, Power Level & Tasks */}
+        {/* Right Panel: Pomodoro Timer (with Explicit MIN & SEC Units), Power Level & Tasks */}
         <div className={`panel-wrapper panel-wrapper-right ${isRightOpen ? '' : 'closed'}`}>
           <div className="toggle-btn toggle-right" onClick={() => setIsRightOpen(!isRightOpen)}>
             {isRightOpen ? '▶' : '◀'}
           </div>
           <div className="panel panel-right">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
               <h2>{mode} Time</h2>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    background: 'rgba(0,0,0,0.25)',
-                    padding: '4px 8px',
+                    gap: '3px',
+                    background: 'rgba(0,0,0,0.3)',
+                    padding: '4px 7px',
                     borderRadius: '6px',
                   }}
+                  title="Set Work Minutes and Seconds"
                 >
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Work</span>
                   <input
                     type="number"
-                    min="1"
+                    min="0"
                     value={workDuration}
-                    onChange={e => handleWorkChange(parseInt(e.target.value, 10) || 1)}
+                    onChange={e => handleWorkMinChange(parseInt(e.target.value, 10) || 0)}
                     style={{
-                      width: '38px',
+                      width: '32px',
                       background: 'transparent',
                       border: 'none',
                       borderBottom: '1px solid var(--glass-border)',
                       color: 'white',
                       textAlign: 'center',
-                      fontSize: '0.85rem',
+                      fontSize: '0.8rem',
                     }}
                     disabled={isRunning}
                   />
+                  <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 700 }}>min</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    value={workSecondsExtra}
+                    onChange={e => handleWorkSecChange(parseInt(e.target.value, 10) || 0)}
+                    style={{
+                      width: '30px',
+                      background: 'transparent',
+                      border: 'none',
+                      borderBottom: '1px solid var(--glass-border)',
+                      color: 'white',
+                      textAlign: 'center',
+                      fontSize: '0.8rem',
+                    }}
+                    disabled={isRunning}
+                  />
+                  <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 700 }}>sec</span>
                 </div>
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px',
-                    background: 'rgba(0,0,0,0.25)',
-                    padding: '4px 8px',
+                    gap: '3px',
+                    background: 'rgba(0,0,0,0.3)',
+                    padding: '4px 7px',
                     borderRadius: '6px',
                   }}
+                  title="Set Break Minutes"
                 >
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Break</span>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Brk</span>
                   <input
                     type="number"
                     min="1"
                     value={breakDuration}
                     onChange={e => handleBreakChange(parseInt(e.target.value, 10) || 1)}
                     style={{
-                      width: '38px',
+                      width: '28px',
                       background: 'transparent',
                       border: 'none',
                       borderBottom: '1px solid var(--glass-border)',
                       color: 'white',
                       textAlign: 'center',
-                      fontSize: '0.85rem',
+                      fontSize: '0.8rem',
                     }}
                     disabled={isRunning}
                   />
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>m</span>
                 </div>
               </div>
             </div>
 
             {isEditingTimer ? (
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <input
-                  type="number"
-                  value={timerInput}
-                  onChange={e => setTimerInput(e.target.value)}
-                  onBlur={handleTimerSubmit}
-                  onKeyDown={e => e.key === 'Enter' && handleTimerSubmit()}
-                  autoFocus
-                  style={{
-                    fontSize: '4.6rem',
-                    fontWeight: 800,
-                    textAlign: 'center',
-                    margin: 0,
-                    fontFamily: 'monospace',
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'white',
-                    outline: 'none',
-                    width: '100%',
-                    textShadow: '0 0 30px var(--primary-glow)',
-                  }}
-                />
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                  background: 'rgba(0,0,0,0.28)',
+                  padding: '12px',
+                  borderRadius: '14px',
+                  border: '1px solid var(--primary)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      value={editMinsInput}
+                      onChange={e => setEditMinsInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleTimerSubmit()}
+                      autoFocus
+                      style={{
+                        fontSize: '2.4rem',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                        fontFamily: 'monospace',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: '8px',
+                        color: 'white',
+                        width: '85px',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 700, marginTop: '3px' }}>
+                      MINUTES
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '2.2rem', fontWeight: 800 }}>:</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      value={editSecsInput}
+                      onChange={e => setEditSecsInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleTimerSubmit()}
+                      style={{
+                        fontSize: '2.4rem',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                        fontFamily: 'monospace',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: '8px',
+                        color: 'white',
+                        width: '85px',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.68rem', color: 'var(--accent)', fontWeight: 700, marginTop: '3px' }}>
+                      SECONDS
+                    </span>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    className="theme-chip"
+                    style={{ fontSize: '0.7rem', padding: '0.25rem 0.55rem' }}
+                    onClick={() => handleQuickTimerSet(0, 5)}
+                  >
+                    ⚡ 5 sec
+                  </button>
+                  <button
+                    type="button"
+                    className="theme-chip"
+                    style={{ fontSize: '0.7rem', padding: '0.25rem 0.55rem' }}
+                    onClick={() => handleQuickTimerSet(1, 0)}
+                  >
+                    1 min
+                  </button>
+                  <button
+                    type="button"
+                    className="theme-chip"
+                    style={{ fontSize: '0.7rem', padding: '0.25rem 0.55rem' }}
+                    onClick={() => handleQuickTimerSet(25, 0)}
+                  >
+                    25 min
+                  </button>
+                  <button
+                    type="button"
+                    style={{ padding: '0.3rem 0.85rem', fontSize: '0.76rem' }}
+                    onClick={handleTimerSubmit}
+                  >
+                    ✓ Set Timer
+                  </button>
+                </div>
               </div>
             ) : (
               <div
                 onClick={handleTimerClick}
                 style={{
-                  fontSize: '4.6rem',
-                  fontWeight: 800,
                   textAlign: 'center',
-                  margin: 0,
-                  fontFamily: 'monospace',
-                  textShadow: '0 0 30px var(--primary-glow)',
-                  color: 'white',
-                  letterSpacing: '-2px',
-                  cursor: isRunning ? 'default' : 'text',
+                  cursor: isRunning ? 'default' : 'pointer',
                 }}
-                title={isRunning ? '' : 'Click to edit minutes'}
+                title={isRunning ? '' : 'Click to edit Minutes & Seconds (e.g. 5 sec)'}
               >
-                {mins}:{secs}
+                <div
+                  style={{
+                    fontSize: '4.4rem',
+                    fontWeight: 800,
+                    margin: 0,
+                    fontFamily: 'monospace',
+                    textShadow: '0 0 30px var(--primary-glow)',
+                    color: 'white',
+                    letterSpacing: '-2px',
+                    lineHeight: 1,
+                  }}
+                >
+                  {mins}:{secs}
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    gap: '3.2rem',
+                    fontSize: '0.65rem',
+                    fontWeight: 700,
+                    color: 'var(--text-muted)',
+                    letterSpacing: '1.5px',
+                    marginTop: '4px',
+                  }}
+                >
+                  <span>MINUTES</span>
+                  <span>SECONDS</span>
+                </div>
               </div>
             )}
 
@@ -1492,7 +1968,6 @@ function App() {
                     onMouseEnter={() => setHoveredTaskId(task.id)}
                     onMouseLeave={() => setHoveredTaskId(prev => (prev === task.id ? null : prev))}
                   >
-                    {/* Translucent Full-View Pop-Up when hovering over long tasks */}
                     {shouldShowHoverPopup && (
                       <div className="task-hover-popup" onClick={e => e.stopPropagation()}>
                         <div style={{ marginBottom: '6px', fontWeight: 500 }}>{task.text}</div>
@@ -1649,8 +2124,8 @@ function App() {
               )}
             </div>
             <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Sign in with your Gmail, choose your persona nickname, and tell us what theme or interest
-              you want for your workspace!
+              Sign in with your Gmail, choose your persona nickname, and type ANY interest or theme to
+              generate your custom 3D workspace!
             </p>
 
             {onboardingError && (
@@ -1698,12 +2173,12 @@ function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0' }}>
-                3. What is your interest or preferred theme?
+                3. Type ANY Interest or Theme (AI Real-Time Generator)
               </label>
               <input
                 type="text"
                 className="input-field"
-                placeholder="Type any interest (e.g., Dragon Ball, AMC's The Walking Dead, Cyberpunk...)"
+                placeholder="e.g., Black Clover, The Last of Us, Dragon Ball, One Piece..."
                 value={themePromptInput}
                 onChange={e => setThemePromptInput(e.target.value)}
               />
@@ -1735,27 +2210,28 @@ function App() {
                 }}
               >
                 <span>
-                  Matched Theme: <strong style={{ color: previewTheme.primary }}>{previewTheme.name}</strong>
+                  AI Theme Preview:{' '}
+                  <strong style={{ color: previewTheme.primary }}>{previewTheme.name}</strong>
                 </span>
                 <span style={{ opacity: 0.8 }}>
-                  Personas: {previewTheme.personas.map(p => p.characterName).join(', ')}
+                  {previewTheme.personas.map(p => p.characterName).join(', ')}
                 </span>
               </div>
             </div>
 
             <button type="submit" style={{ width: '100%', padding: '0.9rem', fontSize: '1rem' }}>
-              🚀 Sign In & Launch {previewTheme.name}
+              🚀 Generate & Launch {previewTheme.name}
             </button>
           </form>
         </div>
       )}
 
-      {/* MODAL 2: Theme Prompt & Customizer */}
+      {/* MODAL 2: Theme Prompt & Real-Time AI World Generator */}
       {showThemeModal && (
         <div className="modal-backdrop" onClick={() => setShowThemeModal(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2>🎨 Customize Theme by Interest</h2>
+              <h2>🎨 AI Theme & World Generator</h2>
               <button
                 className="outline"
                 style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
@@ -1765,45 +2241,46 @@ function App() {
               </button>
             </div>
             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Type any show, game, or interest below (like <strong>Dragon Ball</strong>,{' '}
-              <strong>AMC&apos;s The Walking Dead</strong>, or <strong>Cyberpunk</strong>) and the
-              entire 4K background, 3D orb characters, personas, and 9,000 milestones will adapt!
+              Type <strong>any</strong> anime, show, game, or interest below (e.g.,{' '}
+              <strong>Black Clover</strong>, <strong>The Last of Us</strong>,{' '}
+              <strong>Solo Leveling</strong>, <strong>One Piece</strong>) to generate a custom 4K
+              environment, 3D orb, and character personas in real time!
             </p>
 
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
                 type="text"
                 className="input-field"
-                placeholder="Type your interest or theme..."
+                placeholder="Type any interest (e.g. Black Clover, The Last of Us...)"
                 value={themePromptInput}
                 onChange={e => setThemePromptInput(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter') {
-                    handleApplyThemePrompt(themePromptInput);
                     setShowThemeModal(false);
+                    triggerThemeGenerationWithLoading(themePromptInput);
                   }
                 }}
               />
               <button
                 onClick={() => {
-                  handleApplyThemePrompt(themePromptInput);
                   setShowThemeModal(false);
+                  triggerThemeGenerationWithLoading(themePromptInput);
                 }}
               >
-                Apply
+                ✨ Generate
               </button>
             </div>
 
             <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1' }}>
-              4K Illustrated Worlds:
+              Instant 4K Worlds:
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {Object.values(PRESET_THEMES).map(preset => (
                 <div
                   key={preset.id}
                   onClick={() => {
-                    handleApplyThemePrompt(preset.interestPrompt);
                     setShowThemeModal(false);
+                    triggerThemeGenerationWithLoading(preset.interestPrompt);
                   }}
                   style={{
                     padding: '0.85rem 1rem',
@@ -1943,14 +2420,14 @@ function App() {
                   }}
                 >
                   👑 Signed in as Owner (<strong>{APP_CONFIG.OWNER_EMAIL}</strong>). Only you can view
-                  user Gmail addresses, export CSVs, and configure automated email webhooks.
+                  user Gmail addresses and export CSVs.
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <input
                     type="url"
                     className="input-field"
-                    placeholder="Paste Google Apps Script Web App URL for auto-emails..."
+                    placeholder="Optional: Google Apps Script Webhook URL..."
                     value={webhookUrl}
                     onChange={e => {
                       setWebhookUrl(e.target.value);
@@ -2052,7 +2529,7 @@ function App() {
         </div>
       )}
 
-      {/* MODAL 5: Google Forms Feedback & In-App Feedback */}
+      {/* MODAL 5: Feedback Hub (Opens Built-In Google-Style Survey Form OR Quick 5-Star Box) */}
       {showFeedbackModal && (
         <div className="modal-backdrop" onClick={() => setShowFeedbackModal(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -2067,6 +2544,7 @@ function App() {
               </button>
             </div>
 
+            {/* Option 1: Open Full Google-Forms-Style Survey */}
             <div
               style={{
                 padding: '1rem',
@@ -2075,72 +2553,34 @@ function App() {
                 border: '1px solid rgba(255,255,255,0.12)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
+                gap: '8px',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
-                  📋 Google Feedback Form Option
-                </span>
-                {isOwner && (
-                  <button
-                    type="button"
-                    className="outline"
-                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.72rem' }}
-                    onClick={() => setIsConfiguringFormUrl(!isConfiguringFormUrl)}
-                  >
-                    {isConfiguringFormUrl ? 'Hide Link Setup' : '⚙️ Set Google Form URL'}
-                  </button>
-                )}
-              </div>
-
-              {isOwner && isConfiguringFormUrl && (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input
-                    type="url"
-                    className="input-field"
-                    placeholder="Paste https://docs.google.com/forms/... link here"
-                    value={customGoogleFormUrl}
-                    onChange={e => {
-                      setCustomGoogleFormUrl(e.target.value);
-                      localStorage.setItem('pomodoro-google-form-url', e.target.value);
-                    }}
-                    style={{ padding: '0.55rem 0.75rem', fontSize: '0.8rem' }}
-                  />
-                </div>
-              )}
-
-              {customGoogleFormUrl ? (
-                <a
-                  href={customGoogleFormUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ textDecoration: 'none' }}
-                >
-                  <button type="button" style={{ width: '100%' }}>
-                    📝 Open Google Feedback Form ↗
-                  </button>
-                </a>
-              ) : (
-                <a
-                  href={`mailto:${APP_CONFIG.OWNER_EMAIL}?subject=${encodeURIComponent(
-                    'Focus Arena Feedback'
-                  )}`}
-                  style={{ textDecoration: 'none' }}
-                >
-                  <button type="button" className="outline" style={{ width: '100%' }}>
-                    ✉️ Email Feedback Directly to {APP_CONFIG.OWNER_NAME} ↗
-                  </button>
-                </a>
-              )}
+              <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+                📋 Option 1: Full Feedback Survey Form
+              </span>
+              <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                Fill out our structured survey form (sent directly to {APP_CONFIG.OWNER_NAME}&apos;s
+                Gmail & Admin Inbox).
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFeedbackModal(false);
+                  setShowGoogleSurveyModal(true);
+                }}
+              >
+                📝 Open Full Feedback Form ↗
+              </button>
             </div>
 
+            {/* Option 2: Quick 5-Star In-App Rating */}
             <form
               onSubmit={handleFeedbackSubmit}
               style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}
             >
               <div style={{ fontSize: '0.82rem', fontWeight: 700 }}>
-                Instant In-App Feedback (Sent to {APP_CONFIG.OWNER_NAME}):
+                ⚡ Option 2: Instant 5-Star Feedback (Sent to {APP_CONFIG.OWNER_NAME}):
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {[1, 2, 3, 4, 5].map(star => (
@@ -2169,7 +2609,7 @@ function App() {
                 onChange={e => setFeedbackMessage(e.target.value)}
                 required
               />
-              <button type="submit">Send Feedback</button>
+              <button type="submit">Send Instant Feedback</button>
               {feedbackSubmitted && (
                 <div
                   style={{
@@ -2179,7 +2619,7 @@ function App() {
                     fontWeight: 700,
                   }}
                 >
-                  ✓ Thank you! Your feedback has been sent!
+                  ✓ Sent! Delivered to {APP_CONFIG.OWNER_NAME}&apos;s Admin Inbox & Gmail!
                 </div>
               )}
             </form>
@@ -2187,7 +2627,122 @@ function App() {
         </div>
       )}
 
-      {/* MODAL 6: Post-Session Reminder + Calendar & Microsoft OneNote Sync */}
+      {/* MODAL 5B: Built-In Google-Forms-Style Survey Form */}
+      {showGoogleSurveyModal && (
+        <div className="modal-backdrop" onClick={() => setShowGoogleSurveyModal(false)}>
+          <form
+            className="modal-card"
+            style={{ maxWidth: '560px', borderTop: '6px solid var(--primary)' }}
+            onClick={e => e.stopPropagation()}
+            onSubmit={handleGoogleSurveySubmit}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>📝 Focus Arena — Official Feedback Form</h2>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  Responses are sent directly to {APP_CONFIG.OWNER_NAME} ({APP_CONFIG.OWNER_EMAIL})
+                </div>
+              </div>
+              <button
+                type="button"
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowGoogleSurveyModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                1. How would you rate Focus Arena overall? *
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[1, 2, 3, 4, 5].map(num => (
+                  <button
+                    key={num}
+                    type="button"
+                    className="outline"
+                    style={{
+                      flex: 1,
+                      padding: '0.5rem',
+                      background:
+                        surveyRating === num ? 'var(--primary)' : 'rgba(255,255,255,0.04)',
+                    }}
+                    onClick={() => setSurveyRating(num)}
+                  >
+                    {num} ⭐
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                2. Which 4K Theme World is your favorite so far?
+              </label>
+              <select
+                value={surveyFavTheme}
+                onChange={e => setSurveyFavTheme(e.target.value)}
+                className="input-field"
+                style={{ padding: '0.65rem', background: '#0f172a' }}
+              >
+                <option value="Dragon Ball Super">🐉 Dragon Ball Super</option>
+                <option value="The Walking Dead">🧟 AMC&apos;s The Walking Dead</option>
+                <option value="Cyberpunk: Edgerunners">🤖 Cyberpunk: Edgerunners / 2077</option>
+                <option value="Naruto / Shinobi">🍥 Shinobi Chakra (Naruto)</option>
+                <option value="Dark Fantasy (Elden Ring)">⚔️ Dark Fantasy (Elden Ring)</option>
+                <option value="Custom AI Theme">✨ Custom AI Generated Theme</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                3. What new anime, TV show, or game theme should we add next?
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="e.g., Black Clover, The Last of Us, Solo Leveling, Attack on Titan..."
+                value={surveyThemeRequest}
+                onChange={e => setSurveyThemeRequest(e.target.value)}
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
+                4. Any additional thoughts, bug reports, or feature ideas? *
+              </label>
+              <textarea
+                className="input-field"
+                rows={3}
+                placeholder="Write your feedback here..."
+                value={surveyComments}
+                onChange={e => setSurveyComments(e.target.value)}
+                required
+              />
+            </div>
+
+            <button type="submit" style={{ width: '100%' }}>
+              📨 Submit Feedback Form to {APP_CONFIG.OWNER_NAME}
+            </button>
+            {surveySubmitted && (
+              <div
+                style={{
+                  color: '#4ade80',
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  textAlign: 'center',
+                }}
+              >
+                ✓ Form submitted! Sent directly to {APP_CONFIG.OWNER_NAME}&apos;s Gmail & Admin Inbox!
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* MODAL 6: Post-Session Reminder (with Set / Done button!) + Calendar & OneNote Sync */}
       {showReminderSyncModal && (
         <div className="modal-backdrop" onClick={() => setShowReminderSyncModal(false)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
@@ -2206,28 +2761,51 @@ function App() {
               <label style={{ fontSize: '0.82rem', fontWeight: 700 }}>
                 1. Upcoming Post-Session Reminder (Pops up when timer finishes):
               </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="e.g., Message recruiter on LinkedIn, Call client, Stretch..."
+                value={reminderDraftInput}
+                onChange={e => setReminderDraftInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    setSessionReminderText(reminderDraftInput.trim());
+                    setReminderConfirmMsg('✓ Reminder Set! It will alert you when the timer finishes.');
+                  }
+                }}
+              />
               <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="input-field"
-                  placeholder="e.g., Message recruiter on LinkedIn, Call client, Stretch..."
-                  value={sessionReminderText}
-                  onChange={e => setSessionReminderText(e.target.value)}
-                />
+                <button
+                  type="button"
+                  style={{ flex: 1, padding: '0.65rem' }}
+                  onClick={() => {
+                    setSessionReminderText(reminderDraftInput.trim());
+                    setReminderConfirmMsg('✓ Reminder Set! Closing...');
+                    setTimeout(() => setShowReminderSyncModal(false), 700);
+                  }}
+                >
+                  ✓ Set Reminder & Done
+                </button>
                 {sessionReminderText && (
                   <button
                     type="button"
                     className="danger-btn"
-                    onClick={() => setSessionReminderText('')}
+                    style={{ padding: '0.65rem 1rem' }}
+                    onClick={() => {
+                      setSessionReminderText('');
+                      setReminderDraftInput('');
+                      setReminderConfirmMsg('Reminder cleared.');
+                    }}
                   >
                     Clear
                   </button>
                 )}
               </div>
-              <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                As soon as your current Pomodoro session reaches 00:00, an alert banner and chime will
-                remind you.
-              </span>
+              {reminderConfirmMsg && (
+                <div style={{ color: '#4ade80', fontSize: '0.8rem', fontWeight: 700 }}>
+                  {reminderConfirmMsg}
+                </div>
+              )}
             </div>
 
             <div style={{ height: '1px', background: 'var(--glass-border)' }} />
@@ -2262,12 +2840,12 @@ function App() {
         </div>
       )}
 
-      {/* MODAL 7: Product Showcase, Creator Branding & Pro Tier ($2.99/mo) */}
+      {/* MODAL 7: Product Showcase, Creator Branding & Pro Tier ($2.99/mo + Stripe) */}
       {showProModal && (
         <div className="modal-backdrop" onClick={() => setShowProModal(false)}>
           <div
             className="modal-card"
-            style={{ maxWidth: '640px' }}
+            style={{ maxWidth: '660px' }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2304,9 +2882,9 @@ function App() {
                     gap: '6px',
                   }}
                 >
-                  <li>Pomodoro Focus & Break Timer</li>
+                  <li>Pomodoro Focus & Break Timer (Min/Sec)</li>
                   <li>+1,000 Power Task Gamification</li>
-                  <li>Starter 4K Themes & Personas</li>
+                  <li>5 Built-In 4K Worlds (DBZ, TWD, Cyberpunk, Naruto, Elden Ring)</li>
                   <li>Voice Dictation & Hover Task Copy</li>
                 </ul>
                 <button
@@ -2315,7 +2893,7 @@ function App() {
                   style={{ marginTop: 'auto' }}
                   onClick={() => setShowProModal(false)}
                 >
-                  Current Plan
+                  Included Free
                 </button>
               </div>
 
@@ -2338,29 +2916,62 @@ function App() {
                     gap: '6px',
                   }}
                 >
-                  <li>Unlimited Custom AI Theme Prompts</li>
-                  <li>All 4K Worlds (DBZ, TWD, Cyberpunk, Shinobi, RPG)</li>
+                  <li>
+                    <strong>Real-Time AI Custom World Generator</strong>: Type ANY anime, show, or
+                    game (e.g. <em>Black Clover, The Last of Us, One Piece</em>) & watch it generate
+                    a custom 4K world + orb + personas!
+                  </li>
                   <li>Live Spotify & Apple Music Focus Dock</li>
-                  <li>Microsoft OneNote & Calendar Sync</li>
+                  <li>Microsoft OneNote & Calendar (.ics / Google) Sync</li>
                   <li>PRO Golden Badge & Priority Feature Access</li>
                 </ul>
                 <button
                   type="button"
                   style={{ marginTop: 'auto' }}
                   onClick={() => {
-                    if (APP_CONFIG.PRO_CHECKOUT_URL) {
-                      window.open(APP_CONFIG.PRO_CHECKOUT_URL, '_blank', 'noopener,noreferrer');
+                    if (stripeCheckoutUrl) {
+                      window.open(stripeCheckoutUrl, '_blank', 'noopener,noreferrer');
                     } else {
-                      const nextPro = !isProMember;
-                      setIsProMember(nextPro);
-                      localStorage.setItem('pomodoro-pro-member', String(nextPro));
+                      setShowProModal(false);
+                      setShowThemeModal(true);
                     }
                   }}
                 >
-                  {isProMember ? '✓ Pro Badge Active' : '🚀 Unlock Pro (Early Access)'}
+                  {stripeCheckoutUrl
+                    ? '💳 Subscribe via Stripe ($2.99/mo) ↗'
+                    : '✨ Try Custom AI World Generator Now'}
                 </button>
               </div>
             </div>
+
+            {isOwner && (
+              <div
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '10px',
+                  background: 'rgba(250, 204, 21, 0.08)',
+                  border: '1px solid rgba(250, 204, 21, 0.3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                }}
+              >
+                <span style={{ fontSize: '0.76rem', color: '#fef08a', fontWeight: 700 }}>
+                  👑 Owner Stripe Checkout Link Setup (Only visible to you):
+                </span>
+                <input
+                  type="url"
+                  className="input-field"
+                  placeholder="Paste your Stripe Payment Link (https://buy.stripe.com/...) here"
+                  value={stripeCheckoutUrl}
+                  onChange={e => {
+                    setStripeCheckoutUrl(e.target.value);
+                    localStorage.setItem('pomodoro-stripe-url', e.target.value);
+                  }}
+                  style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem' }}
+                />
+              </div>
+            )}
 
             <div
               style={{
@@ -2397,6 +3008,107 @@ function App() {
                   GitHub (@xakhundx) ↗
                 </a>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 8: Owner-Only Admin Notification Inbox Drawer */}
+      {isOwner && showAdminInboxModal && (
+        <div className="modal-backdrop" onClick={() => setShowAdminInboxModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: '600px' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>🔔 Owner Admin Notification Inbox</h2>
+                <div style={{ fontSize: '0.75rem', color: '#fde047', marginTop: '2px' }}>
+                  👑 Visible only to {APP_CONFIG.OWNER_NAME} ({APP_CONFIG.OWNER_EMAIL})
+                </div>
+              </div>
+              <button
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowAdminInboxModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+              All user feedback, survey responses, and new user sign-ins appear here AND are forwarded
+              to <strong>{APP_CONFIG.OWNER_EMAIL}</strong>.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                maxHeight: '340px',
+                overflowY: 'auto',
+              }}
+            >
+              {adminNotifications.length === 0 ? (
+                <div
+                  style={{
+                    padding: '2rem',
+                    textAlign: 'center',
+                    color: 'var(--text-muted)',
+                    border: '1px dashed rgba(255,255,255,0.15)',
+                    borderRadius: '12px',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  No notifications yet. Test submitting a 5-star rating or survey form to see it pop up
+                  here!
+                </div>
+              ) : (
+                adminNotifications.map(item => (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: '0.9rem 1rem',
+                      borderRadius: '14px',
+                      background: 'rgba(255,255,255,0.06)',
+                      border:
+                        item.type === 'new_user'
+                          ? '1px solid rgba(56, 189, 248, 0.4)'
+                          : '1px solid rgba(250, 204, 21, 0.45)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 800, fontSize: '0.88rem' }}>
+                        {item.type === 'new_user'
+                          ? `🚀 New User: ${item.nickname}`
+                          : item.type === 'survey'
+                          ? `📋 Survey (${item.rating}⭐): ${item.nickname}`
+                          : `⭐ Instant Feedback (${item.rating}⭐): ${item.nickname}`}
+                      </span>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        {item.createdAt}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>
+                      ✉️ {item.gmail}
+                      {item.favoriteTheme ? ` • Fav Theme: ${item.favoriteTheme}` : ''}
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: '#f8fafc', marginTop: '4px' }}>
+                      {item.message}
+                    </div>
+                    {item.featureRequest && (
+                      <div style={{ fontSize: '0.78rem', color: '#fde047' }}>
+                        Requested Theme/Feature: {item.featureRequest}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
