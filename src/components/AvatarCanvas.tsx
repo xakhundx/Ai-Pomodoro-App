@@ -1,9 +1,36 @@
-import React, { Suspense, useRef, useState, useEffect, useMemo } from 'react';
+import React, { Suspense, useRef, useState, useEffect, useMemo, Component, ErrorInfo, ReactNode } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, ContactShadows, Sphere, MeshDistortMaterial, Text } from '@react-three/drei';
+import { Sphere, MeshDistortMaterial } from '@react-three/drei';
 import * as THREE from 'three';
 import gokuImage from '../assets/goku_vegeta.png';
 import { AppTheme, PRESET_THEMES } from '../themes/themeEngine';
+
+// Mobile-Safe Error Boundary so WebGL context failure never crashes the React UI
+interface ErrorBoundaryProps {
+  fallback: ReactNode;
+  children: ReactNode;
+}
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+class WebGLErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.warn('WebGL / Canvas encountered an error, rendering mobile fallback orb:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
 
 function TouchParticles({ trigger, color }: { trigger: number; color: string }) {
   const pointsRef = useRef<THREE.Points>(null);
@@ -11,8 +38,9 @@ function TouchParticles({ trigger, color }: { trigger: number; color: string }) 
 
   useEffect(() => {
     if (trigger > 0) {
-      const newParticles = new Float32Array(180 * 3);
-      for (let i = 0; i < 180 * 3; i++) {
+      const count = typeof window !== 'undefined' && window.innerWidth < 768 ? 90 : 160;
+      const newParticles = new Float32Array(count * 3);
+      for (let i = 0; i < count * 3; i++) {
         newParticles[i] = (Math.random() - 0.5) * 0.6;
       }
       setParticles(newParticles);
@@ -28,7 +56,7 @@ function TouchParticles({ trigger, color }: { trigger: number; color: string }) 
     if (pointsRef.current && particles) {
       const positions = pointsRef.current.geometry.attributes.position.array as Float32Array;
       for (let i = 0; i < positions.length; i++) {
-        positions[i] *= 1.09;
+        positions[i] *= 1.08;
       }
       (pointsRef.current.material as THREE.PointsMaterial).opacity *= 0.93;
       pointsRef.current.geometry.attributes.position.needsUpdate = true;
@@ -100,6 +128,19 @@ function createProceduralThemeTexture(theme: AppTheme): THREE.CanvasTexture {
   return tex;
 }
 
+function LoadingOrb({ color }: { color: string }) {
+  const ringRef = useRef<THREE.Mesh>(null);
+  useFrame((_, delta) => {
+    if (ringRef.current) ringRef.current.rotation.z += delta * 2;
+  });
+  return (
+    <mesh ref={ringRef}>
+      <ringGeometry args={[0.85, 0.9, 32]} />
+      <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
 function AICore({
   mode,
   isRunning,
@@ -132,13 +173,12 @@ function AICore({
         tex.wrapT = THREE.ClampToEdgeWrapping;
         tex.repeat.set(-2, 1);
         tex.offset.set(1.5, 0);
-        tex.anisotropy = 16;
+        tex.anisotropy = 4; // Mobile-safe anisotropy (works on all GPUs)
         tex.needsUpdate = true;
         setLoadedTexture(tex);
       },
       undefined,
       () => {
-        // Keep high-res procedural fallback if remote texture fails
         setLoadedTexture(fallbackTexture);
       }
     );
@@ -152,7 +192,7 @@ function AICore({
 
   useFrame((state) => {
     if (coreRef.current) {
-      baseScaleRef.current = THREE.MathUtils.lerp(baseScaleRef.current, hovered ? 0.82 : 1, 0.1);
+      baseScaleRef.current = THREE.MathUtils.lerp(baseScaleRef.current, hovered ? 0.84 : 1, 0.1);
 
       if (isRunning && mode === 'Work') {
         const scale = baseScaleRef.current + Math.sin(state.clock.elapsedTime * 2) * 0.05;
@@ -171,11 +211,14 @@ function AICore({
     }
   });
 
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+  const sphereSegments = isMobile ? 48 : 80;
+
   return (
     <group>
       <Sphere
         ref={coreRef}
-        args={[1, 128, 128]}
+        args={[1, sphereSegments, sphereSegments]}
         onPointerOver={() => setHover(true)}
         onPointerOut={() => setHover(false)}
         onPointerDown={() => setClickTrigger(prev => prev + 1)}
@@ -187,8 +230,8 @@ function AICore({
           attach="material"
           distort={isRunning && mode === 'Work' ? 0.32 : 0.14}
           speed={isRunning && mode === 'Work' ? 4.5 : isRunning && mode === 'Break' ? 1 : 2.2}
-          roughness={0.15}
-          metalness={0.78}
+          roughness={0.18}
+          metalness={0.75}
           emissive="#222222"
           emissiveIntensity={hovered ? 0.5 : 0.22}
         />
@@ -209,19 +252,62 @@ export default function AvatarCanvas({
   theme?: AppTheme;
   burstTrigger?: number;
 }) {
-  return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Canvas dpr={[1, 2]} camera={{ position: [0, 0, 3.5], fov: 45 }} gl={{ alpha: true, antialias: true }}>
-        <ambientLight intensity={1.1} />
-        <directionalLight position={[2, 2, -2]} intensity={2} castShadow />
-        <spotLight position={[-2, 2, 2]} intensity={2.2} color={theme.accent} />
+  // Mobile fallback if WebGL is unavailable or crashes on mobile device
+  const fallbackUI = (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none',
+      }}
+    >
+      <div
+        style={{
+          width: '170px',
+          height: '170px',
+          borderRadius: '50%',
+          backgroundImage: theme.orbImageUrl ? `url(${theme.orbImageUrl})` : undefined,
+          backgroundColor: theme.primary,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          boxShadow: `0 0 35px ${theme.primary}, 0 0 70px ${theme.accent}66, inset 0 0 20px rgba(255,255,255,0.4)`,
+          animation: 'pulseGlow 3s ease-in-out infinite',
+        }}
+      />
+    </div>
+  );
 
-        <Suspense fallback={<Text position={[0, 0, 0]} fontSize={0.2} color="white">Waking AI...</Text>}>
-          <AICore mode={mode} isRunning={isRunning} theme={theme} burstTrigger={burstTrigger} />
-          <Environment preset="city" />
-          <ContactShadows position={[0, -1.5, 0]} opacity={0.6} scale={10} blur={2.5} far={4} color={theme.primary} />
-        </Suspense>
-      </Canvas>
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        touchAction: 'pan-y',
+      }}
+    >
+      <WebGLErrorBoundary fallback={fallbackUI}>
+        <Canvas
+          dpr={typeof window !== 'undefined' && window.devicePixelRatio > 1.5 ? [1, 1.5] : [1, 2]}
+          camera={{ position: [0, 0, 3.5], fov: 45 }}
+          gl={{ alpha: true, antialias: true, powerPreference: 'default' }}
+        >
+          {/* Zero-download, offline-ready studio lighting calibrated for mobile and desktop */}
+          <ambientLight intensity={1.2} />
+          <hemisphereLight intensity={1.4} groundColor="#090d16" />
+          <directionalLight position={[3, 3, 2]} intensity={2.2} />
+          <directionalLight position={[-3, -2, -2]} intensity={1.0} color={theme.secondary} />
+          <pointLight position={[0, 1.5, 2.5]} intensity={2.2} color={theme.accent} />
+          <pointLight position={[-2, -2, 2]} intensity={1.4} color={theme.primary} />
+
+          <Suspense fallback={<LoadingOrb color={theme.accent} />}>
+            <AICore mode={mode} isRunning={isRunning} theme={theme} burstTrigger={burstTrigger} />
+          </Suspense>
+        </Canvas>
+      </WebGLErrorBoundary>
     </div>
   );
 }

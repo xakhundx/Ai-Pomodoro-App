@@ -430,7 +430,9 @@ function App() {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextClass) return;
-      const ctx = new AudioContextClass();
+      const ctx = (window as any).__pomoAudioCtx || new AudioContextClass();
+      (window as any).__pomoAudioCtx = ctx;
+      if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); }
 
       const playTone = (
         freq: number,
@@ -884,14 +886,7 @@ function App() {
       checkEmail === APP_CONFIG.OWNER_EMAIL.toLowerCase() ||
       (checkEmail ? proEmails.includes(checkEmail) : false);
 
-    // Free Tier Gate: Only Dragon Ball is included in Free Tier; all other 4K worlds require Pro ($2.99/mo)
-    if (resolved.id !== 'dragonball' && !hasProAccess) {
-      setActiveTheme(PRESET_THEMES.dragonball);
-      setAiPersonality(PRESET_THEMES.dragonball.personas[0].id);
-      setLockedThemeAttempt(resolved);
-      setShowProModal(true);
-      return;
-    }
+    // Free Tier Gate: If pro theme picked by free user, still run the 4K loading sequence so user sees progress!
 
     setLockedThemeAttempt(null);
     setIsGeneratingTheme(true);
@@ -923,9 +918,16 @@ function App() {
           localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
         }
         setIsGeneratingTheme(false);
-        setWelcomeThemeBanner(`✨ Welcome to your 4K World: ${resolved.name}!`);
+        if (resolved.id !== 'dragonball' && !hasProAccess) {
+          setLockedThemeAttempt(resolved);
+          setWelcomeThemeBanner(`✨ Free Preview Active: ${resolved.name}! Upgrade to Pro ($2.99/mo) to unlock permanently.`);
+          setTimeout(() => setShowProModal(true), 3200);
+        } else {
+          setLockedThemeAttempt(null);
+          setWelcomeThemeBanner(`✨ Welcome to your 4K World: ${resolved.name}!`);
+        }
         playSound('achievement');
-        setTimeout(() => setWelcomeThemeBanner(null), 5000);
+        setTimeout(() => setWelcomeThemeBanner(null), 6000);
       }, 600);
     }, 1050);
   };
@@ -2210,10 +2212,29 @@ function App() {
                 </button>
               )}
             </div>
-            <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Sign in with your Gmail, choose your persona nickname, and type ANY interest or theme to
-              generate your custom 3D workspace!
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5, flex: 1, minWidth: '220px' }}>
+                Sign in with your Gmail, choose your persona nickname, and select ANY interest or theme to generate your custom 3D workspace!
+              </p>
+              <button
+                type="button"
+                className="outline"
+                style={{
+                  fontSize: '0.72rem',
+                  padding: '3px 8px',
+                  borderColor: 'var(--primary)',
+                  color: '#c084fc',
+                  whiteSpace: 'nowrap',
+                }}
+                onClick={() => {
+                  setNicknameInput('XAKHUNDX');
+                  setGmailInput(APP_CONFIG.OWNER_EMAIL);
+                  setThemePromptInput('Dragon Ball');
+                }}
+              >
+                ⚡ 1-Tap Sign-In ({APP_CONFIG.OWNER_NAME})
+              </button>
+            </div>
 
             {onboardingError && (
               <div
@@ -2988,7 +3009,7 @@ function App() {
               >
                 <div>
                   <div style={{ fontWeight: 800, color: '#fde047', fontSize: '0.9rem' }}>
-                    🔒 &ldquo;{lockedThemeAttempt}&rdquo; is a Focus Arena Pro World!
+                    🔒 &ldquo;{lockedThemeAttempt?.name || 'Selected World'}&rdquo; is a Focus Arena Pro World!
                   </div>
                   <div style={{ fontSize: '0.78rem', color: '#e2e8f0', marginTop: '2px' }}>
                     Free Tier includes the Dragon Ball Super 4K World. Upgrade to Pro ($2.99/mo) to unlock all 14+ 4K Anime, Gaming & Cinema Worlds!
