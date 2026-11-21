@@ -542,7 +542,7 @@ function App() {
     return () => clearTimeout(timer);
   }, [currentToast]);
 
-  // Enhanced High-Accuracy Hybrid Voice Dictation (Web Speech API + Local Whisper AI Fallback + Live Mic Meter)
+  // Enhanced High-Accuracy Hybrid Voice Dictation (Web Speech API + Off-Thread Whisper Web Worker + Live Mic Meter)
   const [isListening, setIsListening] = useState(false);
   const [isTranscribingFallback, setIsTranscribingFallback] = useState(false);
   const [micLevel, setMicLevel] = useState<number>(0);
@@ -557,50 +557,172 @@ function App() {
   const shouldListenRef = useRef<boolean>(false);
   const committedTextRef = useRef<string>('');
   const sessionTranscriptRef = useRef<string>('');
+  const latestTaskTextRef = useRef<string>('');
   const taskInputRef = useRef<HTMLInputElement | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Parallel Audio Capture & Local Whisper Fallback Refs (solves Microsoft Edge / Brave / Windows speech silence)
+  // Parallel Audio Capture & Off-Main-Thread Whisper Web Worker Refs
   const micStreamRef = useRef<MediaStream | null>(null);
   const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const micGainRef = useRef<GainNode | null>(null);
+  const captureSessionIdRef = useRef<number>(0);
   const pcmChunksRef = useRef<Float32Array[]>([]);
   const preRollChunksRef = useRef<Float32Array[]>([]);
   const hasActiveUtteranceRef = useRef<boolean>(false);
   const speechFrameCountRef = useRef<number>(0);
+  const utteranceSamplesRef = useRef<number>(0);
+  const noiseFloorRef = useRef<number>(0.008);
   const lastVoiceTimeRef = useRef<number>(0);
+  const lastMeterUpdateRef = useRef<number>(0);
   const webSpeechGotResultRef = useRef<boolean>(false);
-  const whisperPipelineRef = useRef<any>(null);
-  const whisperLoadingPromiseRef = useRef<Promise<any> | null>(null);
+  const whisperWorkerRef = useRef<Worker | null>(null);
+  const whisperModelReadyRef = useRef<boolean>(false);
+  const nextWorkerJobIdRef = useRef<number>(1);
+  const pendingWorkerJobsRef = useRef<number>(0);
+  const pendingAutoAddRef = useRef<boolean>(false);
 
-  const getWhisperTranscriber = async () => {
-    if (whisperPipelineRef.current) return whisperPipelineRef.current;
-    if (whisperLoadingPromiseRef.current) return whisperLoadingPromiseRef.current;
+  // Keep latestTaskTextRef synced with newTaskText state
+  useEffect(() => {
+    latestTaskTextRef.current = newTaskText;
+  }, [newTaskText]);
 
-    whisperLoadingPromiseRef.current = (async () => {
-      try {
-        const transformersUrl = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-        const mod: any = await import(/* @vite-ignore */ transformersUrl);
-        if (mod.env) {
-          mod.env.allowLocalModels = false;
-          mod.env.useBrowserCache = true;
-        }
-        const pipe = await mod.pipeline(
-          'automatic-speech-recognition',
-          'Xenova/whisper-tiny.en',
-          { quantized: true }
-        );
-        whisperPipelineRef.current = pipe;
-        return pipe;
-      } catch (err) {
-        console.warn('Local Whisper fallback model failed to load:', err);
-        whisperLoadingPromiseRef.current = null;
-        return null;
-      }
-    })();
-
-    return whisperLoadingPromiseRef.current;
+  const commitTaskByText = (rawText: string) => {
+    const clean = rawText.trim();
+    if (!clean) return;
+    setTasks(prev => [...prev, { id: Date.now().toString(), text: clean, completed: false }]);
+    setNewTaskText('');
+    latestTaskTextRef.current = '';
+    committedTextRef.current = '';
+    sessionTranscriptRef.current = '';
   };
+
+  const ensureWhisperWorker = () => {
+    if (whisperWorkerRef.current) return whisperWorkerRef.current;
+
+    try {
+      const worker = new Worker(new URL('./workers/whisperWorker.ts', import.meta.url), {
+        type: 'module',
+      });
+
+      worker.onmessage = (event: MessageEvent) => {
+        const msg = event.data;
+        if (!msg || !msg.type) return;
+
+        if (msg.type === 'status') {
+          if (msg.status === 'ready') {
+            whisperModelReadyRef.current = true;
+            if (shouldListenRef.current && pendingWorkerJobsRef.current === 0) {
+              setVoiceStatusText('🎙️ Listening... Speak your task now');
+            }
+          } else if (msg.status === 'loading') {
+            whisperModelReadyRef.current = false;
+            if (pendingWorkerJobsRef.current > 0) {
+              setVoiceStatusText('🧠 Loading AI voice engine (1st time ~3s)...');
+            }
+          } else if (msg.status === 'error') {
+            if (pendingWorkerJobsRef.current > 0) {
+              setVoiceError(`AI voice engine error: ${msg.message || 'Could not load model'}`);
+            }
+          }
+          return;
+        }
+
+        if (msg.type === 'result') {
+          pendingWorkerJobsRef.current = Math.max(0, pendingWorkerJobsRef.current - 1);
+          const doneAll = pendingWorkerJobsRef.current === 0;
+          if (doneAll) {
+            setIsTranscribingFallback(false);
+          }
+
+          const rawText = typeof msg.text === 'string' ? msg.text.trim() : '';
+          let finalFullText = latestTaskTextRef.current;
+
+          if (rawText) {
+            committedTextRef.current = `${committedTextRef.current}${rawText} `.replace(/\s+/g, ' ');
+            const combined = committedTextRef.current.trim();
+            finalFullText =
+              combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
+            setNewTaskText(finalFullText);
+            latestTaskTextRef.current = finalFullText;
+            setVoiceStatusText(`🎙️ Heard: "${rawText}"`);
+          } else if (shouldListenRef.current && doneAll) {
+            setVoiceStatusText('🎙️ Listening... Speak your task clearly');
+          }
+
+          if ((msg.autoAdd || pendingAutoAddRef.current) && doneAll) {
+            pendingAutoAddRef.current = false;
+            if (finalFullText.trim()) {
+              commitTaskByText(finalFullText);
+              setVoiceStatusText('');
+            } else {
+              setVoiceStatusText('');
+              setVoiceError('No clear speech was detected. Try speaking closer to the selected mic.');
+            }
+          } else if (!shouldListenRef.current && doneAll) {
+            setVoiceStatusText('');
+            taskInputRef.current?.focus();
+          }
+          return;
+        }
+
+        if (msg.type === 'error') {
+          pendingWorkerJobsRef.current = Math.max(0, pendingWorkerJobsRef.current - 1);
+          const doneAll = pendingWorkerJobsRef.current === 0;
+          if (doneAll) {
+            setIsTranscribingFallback(false);
+            setVoiceStatusText('');
+          }
+          console.warn('Whisper worker transcription error:', msg.message);
+          setVoiceError(`Voice transcription failed: ${msg.message || 'Please try again.'}`);
+          if ((msg.autoAdd || pendingAutoAddRef.current) && doneAll) {
+            pendingAutoAddRef.current = false;
+            if (latestTaskTextRef.current.trim()) {
+              commitTaskByText(latestTaskTextRef.current);
+            }
+          }
+        }
+      };
+
+      worker.onerror = (err) => {
+        console.warn('Whisper Web Worker error:', err);
+        pendingWorkerJobsRef.current = 0;
+        setIsTranscribingFallback(false);
+      };
+
+      whisperWorkerRef.current = worker;
+      return worker;
+    } catch (err) {
+      console.warn('Could not start Whisper Web Worker:', err);
+      return null;
+    }
+  };
+
+  // Cleanup audio capture, speech recognition, and worker on unmount
+  useEffect(() => {
+    return () => {
+      shouldListenRef.current = false;
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // Ignore
+        }
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (micAudioCtxRef.current) {
+        micAudioCtxRef.current.close().catch(() => {});
+      }
+      if (whisperWorkerRef.current) {
+        whisperWorkerRef.current.terminate();
+        whisperWorkerRef.current = null;
+      }
+    };
+  }, []);
 
   const resampleTo16kHz = (samples: Float32Array, inputRate: number): Float32Array => {
     if (!inputRate || inputRate === 16000) return samples;
@@ -618,13 +740,14 @@ function App() {
     return result;
   };
 
-  const transcribeBufferedAudioWithWhisper = async (
+  const dispatchAudioToWhisperWorker = (
     chunks: Float32Array[],
-    sampleRate: number
-  ) => {
-    if (!chunks.length) return;
+    sampleRate: number,
+    autoAdd = false
+  ): boolean => {
+    if (!chunks.length) return false;
     const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
-    if (totalLen < sampleRate * 0.22) return;
+    if (totalLen < sampleRate * 0.2) return false;
 
     const merged = new Float32Array(totalLen);
     let offset = 0;
@@ -641,74 +764,69 @@ function App() {
       const a = Math.abs(resampled[i]);
       if (a > maxAbs) maxAbs = a;
     }
-    if (maxAbs < 0.004) return;
-    if (maxAbs < 0.75) {
+    if (maxAbs < 0.004) return false;
+    if (maxAbs < 0.78) {
       const gain = 0.85 / maxAbs;
       for (let i = 0; i < resampled.length; i++) {
         resampled[i] *= gain;
       }
     }
 
+    const worker = ensureWhisperWorker();
+    if (!worker) return false;
+
+    const jobId = nextWorkerJobIdRef.current++;
+    pendingWorkerJobsRef.current += 1;
     setIsTranscribingFallback(true);
     setVoiceStatusText(
-      whisperPipelineRef.current
-        ? '🧠 Transcribing your voice...'
-        : '🧠 Initializing AI voice engine (1st time takes ~3s)...'
+      whisperModelReadyRef.current
+        ? autoAdd
+          ? '🧠 Transcribing & adding task...'
+          : '🧠 Transcribing your voice...'
+        : '🧠 Loading AI voice engine (1st time ~3s)...'
     );
 
-    try {
-      const transcriber = await getWhisperTranscriber();
-      if (!transcriber) {
-        setIsTranscribingFallback(false);
-        return;
-      }
-
-      const output = await transcriber(resampled, {
-        language: 'english',
-        task: 'transcribe',
-      });
-
-      const rawText = (typeof output?.text === 'string' ? output.text : '')
-        .replace(/\[.*?\]|\(.*?\)/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (
-        rawText &&
-        !/^(you|thank you\.?|thanks for watching\.?|\.)$/i.test(rawText)
-      ) {
-        committedTextRef.current = `${committedTextRef.current}${rawText} `.replace(/\s+/g, ' ');
-        const combined = committedTextRef.current.trim();
-        const formatted =
-          combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
-        setNewTaskText(formatted);
-        setVoiceStatusText(`🎙️ Heard: "${rawText}"`);
-      } else if (shouldListenRef.current) {
-        setVoiceStatusText('🎙️ Listening... Speak your task clearly');
-      }
-    } catch (err) {
-      console.warn('Whisper transcription error:', err);
-    } finally {
-      setIsTranscribingFallback(false);
-    }
+    // Zero-copy transfer of Float32Array buffer off main thread (0ms UI freeze!)
+    worker.postMessage(
+      { type: 'transcribe', id: jobId, audio: resampled, autoAdd },
+      [resampled.buffer]
+    );
+    return true;
   };
 
   const cleanupAudioCapture = () => {
+    captureSessionIdRef.current += 1;
     if (micProcessorRef.current) {
       micProcessorRef.current.onaudioprocess = null;
       try {
         micProcessorRef.current.disconnect();
       } catch {
-        // Ignore disconnect error
+        // Ignore
       }
       micProcessorRef.current = null;
+    }
+    if (micSourceRef.current) {
+      try {
+        micSourceRef.current.disconnect();
+      } catch {
+        // Ignore
+      }
+      micSourceRef.current = null;
+    }
+    if (micGainRef.current) {
+      try {
+        micGainRef.current.disconnect();
+      } catch {
+        // Ignore
+      }
+      micGainRef.current = null;
     }
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach(t => {
         try {
           t.stop();
         } catch {
-          // Ignore track stop error
+          // Ignore
         }
       });
       micStreamRef.current = null;
@@ -717,7 +835,7 @@ function App() {
       try {
         micAudioCtxRef.current.close().catch(() => {});
       } catch {
-        // Ignore close error
+        // Ignore
       }
       micAudioCtxRef.current = null;
     }
@@ -740,43 +858,67 @@ function App() {
     }
   };
 
-  const stopListening = (flushPendingAudio = true) => {
+  const stopListening = (flushPendingAudio = true, autoAddTask = false) => {
     shouldListenRef.current = false;
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
 
-    if (
-      flushPendingAudio &&
-      !webSpeechGotResultRef.current &&
-      pcmChunksRef.current.length > 0 &&
-      speechFrameCountRef.current >= 2
-    ) {
-      const pending = [...pcmChunksRef.current];
-      const sr = micAudioCtxRef.current?.sampleRate || 16000;
-      pcmChunksRef.current = [];
-      preRollChunksRef.current = [];
-      hasActiveUtteranceRef.current = false;
-      speechFrameCountRef.current = 0;
-      void transcribeBufferedAudioWithWhisper(pending, sr);
-    } else {
-      pcmChunksRef.current = [];
-      preRollChunksRef.current = [];
-      hasActiveUtteranceRef.current = false;
-      speechFrameCountRef.current = 0;
+    // Commit any active Web Speech interim result before aborting
+    if (sessionTranscriptRef.current) {
+      committedTextRef.current = `${committedTextRef.current}${sessionTranscriptRef.current} `.replace(
+        /\s+/g,
+        ' '
+      );
+      sessionTranscriptRef.current = '';
     }
 
+    const pendingChunks = [...pcmChunksRef.current];
+    const hadSpeech = speechFrameCountRef.current >= 1;
+    const sr = micAudioCtxRef.current?.sampleRate || 16000;
+    const webSpeechHandledIt = webSpeechGotResultRef.current;
+
+    pcmChunksRef.current = [];
+    preRollChunksRef.current = [];
+    hasActiveUtteranceRef.current = false;
+    speechFrameCountRef.current = 0;
+    utteranceSamplesRef.current = 0;
+
     setIsListening(false);
-    setVoiceStatusText('');
-    cleanupRecognitionInstance('stop');
+    // Abort immediately so Edge releases OS Speech Recognition before next note
+    cleanupRecognitionInstance('abort');
     cleanupAudioCapture();
+
+    if (autoAddTask) {
+      pendingAutoAddRef.current = true;
+    }
+
+    let dispatchedToWorker = false;
+    if (flushPendingAudio && !webSpeechHandledIt && pendingChunks.length > 0 && hadSpeech) {
+      dispatchedToWorker = dispatchAudioToWhisperWorker(pendingChunks, sr, autoAddTask);
+    }
+
+    if (!dispatchedToWorker && pendingWorkerJobsRef.current === 0) {
+      pendingAutoAddRef.current = false;
+      setVoiceStatusText('');
+      if (autoAddTask) {
+        if (latestTaskTextRef.current.trim()) {
+          commitTaskByText(latestTaskTextRef.current);
+        }
+      } else {
+        taskInputRef.current?.focus();
+      }
+    } else if (autoAddTask && pendingWorkerJobsRef.current > 0) {
+      setVoiceStatusText('🧠 Finishing transcription & adding task...');
+    }
   };
 
   const startAudioCapture = async (overrideMicId?: string) => {
     cleanupAudioCapture();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
 
+    const mySessionId = captureSessionIdRef.current;
     const targetId = overrideMicId !== undefined ? overrideMicId : selectedMicId;
     let stream: MediaStream;
     try {
@@ -799,7 +941,7 @@ function App() {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (err) {
         console.warn('Microphone getUserMedia failed:', err);
-        stopListening(false);
+        stopListening(false, false);
         setVoiceError(
           'Microphone permission denied or no mic available. Please allow microphone access in your browser address bar.'
         );
@@ -807,7 +949,8 @@ function App() {
       }
     }
 
-    if (!shouldListenRef.current) {
+    // Abort cleanly if user stopped or switched mic while getUserMedia was pending
+    if (!shouldListenRef.current || captureSessionIdRef.current !== mySessionId) {
       stream.getTracks().forEach(t => t.stop());
       return;
     }
@@ -826,6 +969,10 @@ function App() {
       // Ignore device enumeration errors
     }
 
+    if (!shouldListenRef.current || captureSessionIdRef.current !== mySessionId) {
+      return;
+    }
+
     try {
       const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtxClass) return;
@@ -838,8 +985,20 @@ function App() {
       if (audioCtx.state === 'suspended') {
         await audioCtx.resume().catch(() => {});
       }
-      micAudioCtxRef.current = audioCtx;
+      if (!shouldListenRef.current || captureSessionIdRef.current !== mySessionId) {
+        audioCtx.close().catch(() => {});
+        return;
+      }
 
+      micAudioCtxRef.current = audioCtx;
+      noiseFloorRef.current = 0.008;
+      pcmChunksRef.current = [];
+      preRollChunksRef.current = [];
+      hasActiveUtteranceRef.current = false;
+      speechFrameCountRef.current = 0;
+      utteranceSamplesRef.current = 0;
+
+      // Retain ALL nodes in refs so Chromium/Edge V8 GC never kills the audio graph
       const source = audioCtx.createMediaStreamSource(stream);
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
       const silentGain = audioCtx.createGain();
@@ -848,10 +1007,15 @@ function App() {
       source.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(audioCtx.destination);
+
+      micSourceRef.current = source;
       micProcessorRef.current = processor;
+      micGainRef.current = silentGain;
+
+      const maxUtteranceSamples = audioCtx.sampleRate * 8;
 
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
-        if (!shouldListenRef.current) return;
+        if (!shouldListenRef.current || captureSessionIdRef.current !== mySessionId) return;
         const input = e.inputBuffer.getChannelData(0);
         const frame = new Float32Array(input.length);
         frame.set(input);
@@ -861,48 +1025,87 @@ function App() {
           sumSq += frame[i] * frame[i];
         }
         const rms = Math.sqrt(sumSq / frame.length);
-        const level = Math.min(
-          100,
-          Math.round(Math.pow(Math.max(0, rms - 0.0015) / 0.1, 0.55) * 100)
-        );
-        setMicLevel(level);
 
-        const isSpeechFrame = rms > 0.009;
+        // Throttle React meter updates to ~11fps for silky-smooth UI
+        const now = Date.now();
+        if (now - lastMeterUpdateRef.current > 90) {
+          lastMeterUpdateRef.current = now;
+          const level = Math.min(
+            100,
+            Math.round(Math.pow(Math.max(0, rms - 0.0015) / 0.1, 0.55) * 100)
+          );
+          setMicLevel(level);
+        }
+
+        // Adaptive voice activity threshold handles both quiet and auto-gained Windows mics
+        const speechThreshold = Math.max(0.011, noiseFloorRef.current * 2.2);
+        const isSpeechFrame = rms > speechThreshold;
+
         if (isSpeechFrame) {
           if (!hasActiveUtteranceRef.current) {
             hasActiveUtteranceRef.current = true;
             speechFrameCountRef.current = 0;
+            utteranceSamplesRef.current = 0;
             for (const pre of preRollChunksRef.current) {
               pcmChunksRef.current.push(pre);
+              utteranceSamplesRef.current += pre.length;
             }
             preRollChunksRef.current = [];
           }
           speechFrameCountRef.current += 1;
-          lastVoiceTimeRef.current = Date.now();
+          lastVoiceTimeRef.current = now;
           pcmChunksRef.current.push(frame);
+          utteranceSamplesRef.current += frame.length;
 
-          if (!webSpeechGotResultRef.current && speechFrameCountRef.current === 2) {
-            setVoiceStatusText('🎙️ Voice detected... Keep speaking (or click Done)');
+          if (
+            !webSpeechGotResultRef.current &&
+            speechFrameCountRef.current === 1 &&
+            pendingWorkerJobsRef.current === 0
+          ) {
+            setVoiceStatusText('🎙️ Hearing your voice...');
           }
-        } else if (hasActiveUtteranceRef.current) {
-          pcmChunksRef.current.push(frame);
-          const silenceMs = Date.now() - lastVoiceTimeRef.current;
-          if (silenceMs > 900) {
+
+          // Auto-flush after 8 seconds of continuous audio so long tasks never stall or build up
+          if (utteranceSamplesRef.current >= maxUtteranceSamples) {
             const chunksToProcess = [...pcmChunksRef.current];
-            const speechFrames = speechFrameCountRef.current;
             pcmChunksRef.current = [];
             hasActiveUtteranceRef.current = false;
             speechFrameCountRef.current = 0;
-
-            if (!webSpeechGotResultRef.current && speechFrames >= 2) {
-              void transcribeBufferedAudioWithWhisper(chunksToProcess, audioCtx.sampleRate);
+            utteranceSamplesRef.current = 0;
+            if (!webSpeechGotResultRef.current) {
+              dispatchAudioToWhisperWorker(chunksToProcess, audioCtx.sampleRate, false);
             }
             webSpeechGotResultRef.current = false;
           }
         } else {
-          preRollChunksRef.current.push(frame);
-          if (preRollChunksRef.current.length > 3) {
-            preRollChunksRef.current.shift();
+          // Gently track ambient noise floor during silence
+          noiseFloorRef.current = Math.min(
+            0.035,
+            Math.max(0.003, noiseFloorRef.current * 0.92 + rms * 0.08)
+          );
+
+          if (hasActiveUtteranceRef.current) {
+            pcmChunksRef.current.push(frame);
+            utteranceSamplesRef.current += frame.length;
+            const silenceMs = now - lastVoiceTimeRef.current;
+            if (silenceMs > 750) {
+              const chunksToProcess = [...pcmChunksRef.current];
+              const speechFrames = speechFrameCountRef.current;
+              pcmChunksRef.current = [];
+              hasActiveUtteranceRef.current = false;
+              speechFrameCountRef.current = 0;
+              utteranceSamplesRef.current = 0;
+
+              if (!webSpeechGotResultRef.current && speechFrames >= 1) {
+                dispatchAudioToWhisperWorker(chunksToProcess, audioCtx.sampleRate, false);
+              }
+              webSpeechGotResultRef.current = false;
+            }
+          } else {
+            preRollChunksRef.current.push(frame);
+            if (preRollChunksRef.current.length > 2) {
+              preRollChunksRef.current.shift();
+            }
           }
         }
       };
@@ -915,7 +1118,6 @@ function App() {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      // Browser lacks Web Speech API (e.g. Firefox); local Whisper engine handles transcription
       return;
     }
 
@@ -951,27 +1153,28 @@ function App() {
       const cleanSession = transcript.replace(/\s+/g, ' ').trim();
       if (!cleanSession) return;
 
-      // Mark that native Web Speech succeeded so fallback Whisper doesn't duplicate it
+      // Native Web Speech succeeded: discard pending Whisper buffer for this utterance to avoid duplicates
       webSpeechGotResultRef.current = true;
       pcmChunksRef.current = [];
       hasActiveUtteranceRef.current = false;
       speechFrameCountRef.current = 0;
+      utteranceSamplesRef.current = 0;
 
       sessionTranscriptRef.current = cleanSession;
       const combined = `${committedTextRef.current}${cleanSession}`.replace(/\s+/g, ' ').trim();
       const formatted =
         combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
       setNewTaskText(formatted);
+      latestTaskTextRef.current = formatted;
       setVoiceStatusText(`🎙️ Heard: "${cleanSession}"`);
     };
 
     recognition.onerror = (event: any) => {
       const errCode = event?.error;
-      console.warn('Web Speech notice (fallback active):', errCode);
+      console.warn('Web Speech notice (off-thread Whisper worker active):', errCode);
       if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
-        // Only stop if getUserMedia also didn't open
         if (!micStreamRef.current) {
-          stopListening(false);
+          stopListening(false, false);
           setVoiceError(
             'Microphone permission denied. Please allow microphone access in your browser address bar.'
           );
@@ -992,7 +1195,7 @@ function App() {
     try {
       recognition.start();
     } catch {
-      // Local Whisper fallback via startAudioCapture remains active
+      // Off-thread Whisper worker via startAudioCapture handles transcription seamlessly
     }
   };
 
@@ -1000,6 +1203,7 @@ function App() {
     setSelectedMicId(newDeviceId);
     localStorage.setItem('pomodoro-mic-device-id', newDeviceId);
     if (shouldListenRef.current) {
+      webSpeechGotResultRef.current = false;
       setVoiceStatusText('🎙️ Switched microphone — speak your task now');
       void startAudioCapture(newDeviceId);
     }
@@ -1007,27 +1211,34 @@ function App() {
 
   const toggleListening = () => {
     if (isListening || shouldListenRef.current) {
-      stopListening(true);
-      taskInputRef.current?.focus();
+      stopListening(true, false);
       return;
     }
 
     setVoiceError(null);
-    committedTextRef.current = newTaskText.trim() ? `${newTaskText.trim()} ` : '';
+    pendingAutoAddRef.current = false;
+    committedTextRef.current = latestTaskTextRef.current.trim()
+      ? `${latestTaskTextRef.current.trim()} `
+      : '';
     sessionTranscriptRef.current = '';
     pcmChunksRef.current = [];
     preRollChunksRef.current = [];
     hasActiveUtteranceRef.current = false;
     speechFrameCountRef.current = 0;
+    utteranceSamplesRef.current = 0;
     webSpeechGotResultRef.current = false;
     shouldListenRef.current = true;
     setIsListening(true);
     setVoiceStatusText('🎙️ Listening... Speak your task now');
     taskInputRef.current?.focus();
 
-    // Pre-warm local Whisper AI fallback in background for Microsoft Edge / Brave / Firefox
-    void getWhisperTranscriber();
+    // Preload off-main-thread Whisper worker immediately (zero UI blocking)
+    const worker = ensureWhisperWorker();
+    worker?.postMessage({ type: 'preload' });
+
     void startAudioCapture();
+    // Only run OS Web Speech in parallel when user hasn't explicitly picked a custom non-default mic,
+    // or run it cleanly alongside so whichever detects speech first wins cleanly
     startRecognitionInstance();
   };
 
@@ -1196,14 +1407,12 @@ function App() {
 
   // Task Handlers
   const addTask = () => {
-    if (!newTaskText.trim()) return;
+    const clean = latestTaskTextRef.current.trim() || newTaskText.trim();
+    if (!clean) return;
     if (isListening || shouldListenRef.current) {
-      stopListening(false);
+      stopListening(false, false);
     }
-    setTasks([...tasks, { id: Date.now().toString(), text: newTaskText.trim(), completed: false }]);
-    setNewTaskText('');
-    committedTextRef.current = '';
-    sessionTranscriptRef.current = '';
+    commitTaskByText(clean);
   };
 
   const toggleTask = (id: string, text: string, completed: boolean) => {
@@ -2593,14 +2802,31 @@ function App() {
                       : voiceStatusText || '🎙️ Listening... Speak your task now'}
                   </span>
                   {isListening && (
-                    <button
-                      type="button"
-                      className="task-action-btn"
-                      onClick={toggleListening}
-                      style={{ borderColor: '#ef4444', color: '#fecaca' }}
-                    >
-                      Done
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="task-action-btn"
+                        onClick={() => stopListening(true, true)}
+                        style={{
+                          borderColor: '#4ade80',
+                          color: '#bbf7d0',
+                          background: 'rgba(34, 197, 94, 0.2)',
+                          fontWeight: 700,
+                        }}
+                        title="Stop microphone, finish transcribing, and add task to your list"
+                      >
+                        ✓ Add Task
+                      </button>
+                      <button
+                        type="button"
+                        className="task-action-btn"
+                        onClick={() => stopListening(true, false)}
+                        style={{ borderColor: '#ef4444', color: '#fecaca' }}
+                        title="Stop microphone and keep text in input box to edit"
+                      >
+                        Stop
+                      </button>
+                    </div>
                   )}
                 </div>
 
