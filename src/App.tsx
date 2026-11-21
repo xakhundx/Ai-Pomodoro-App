@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import AvatarCanvas from './components/AvatarCanvas';
+import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { askGemini, Task } from './services/gemini';
 import {
   AppTheme,
@@ -9,14 +8,29 @@ import {
   enrichCustomThemeWithLiveLore,
 } from './themes/themeEngine';
 import { APP_CONFIG } from './config/appConfig';
+import { getOrCreateVisitorId, trackAnonymousEvent } from './services/analytics';
+import { soundscapeEngine, SoundscapeType } from './services/soundscapes';
 import './index.css';
+
+// Code-split heavy Three.js / WebGL 3D Core so initial mobile & desktop UI loads instantaneously
+const AvatarCanvas = React.lazy(() => import('./components/AvatarCanvas'));
 
 interface UserProfile {
   nickname: string;
-  gmail: string;
+  gmail: string; // Optional — empty string for Guest Mode
+  visitorId?: string;
+  isGuest?: boolean;
+  claimedBonusThemeId?: string | null;
   interestPrompt: string;
   joinedAt: string;
   lastActive: string;
+}
+
+interface FocusDayLog {
+  date: string; // YYYY-MM-DD
+  minutes: number;
+  sessions: number;
+  tasksCompleted: number;
 }
 
 interface AdminNotification {
@@ -170,7 +184,10 @@ function App() {
 
   const unreadAdminCount = adminNotifications.filter(n => !n.read).length;
 
-  // Onboarding Form Inputs
+  // Anonymous Privacy-First Visitor ID (Tracks Active Users Without Requiring Email!)
+  const visitorId = useMemo(() => getOrCreateVisitorId(), []);
+
+  // Onboarding Form Inputs (Supports Guest Mode + Optional Email + 1 Free Bonus Paid World!)
   const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(() => !userProfile);
   const [nicknameInput, setNicknameInput] = useState(userProfile?.nickname || '');
   const [gmailInput, setGmailInput] = useState(userProfile?.gmail || '');
@@ -178,6 +195,14 @@ function App() {
     userProfile?.interestPrompt || localStorage.getItem('pomodoro-theme-prompt') || 'Dragon Ball'
   );
   const [onboardingError, setOnboardingError] = useState('');
+
+  // 1 Free Bonus Paid Theme Selection (Dragon Ball + 1 Paid Theme Free Forever!)
+  const [claimedBonusThemeId, setClaimedBonusThemeId] = useState<string | null>(
+    () => userProfile?.claimedBonusThemeId || localStorage.getItem('pomodoro-bonus-theme-id') || null
+  );
+  const [onboardingBonusChoice, setOnboardingBonusChoice] = useState<string>(
+    () => userProfile?.claimedBonusThemeId || localStorage.getItem('pomodoro-bonus-theme-id') || 'sololeveling'
+  );
 
   // Active Modals & Docks
   const [showThemeModal, setShowThemeModal] = useState(false);
@@ -188,6 +213,142 @@ function App() {
   const [showMusicDock, setShowMusicDock] = useState(false);
   const [showReminderSyncModal, setShowReminderSyncModal] = useState(false);
   const [showProModal, setShowProModal] = useState(false);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState<null | 'privacy' | 'terms' | 'refund'>(null);
+
+  // Mobile Bottom Tab Navigation (< 768px)
+  const [mobileTab, setMobileTab] = useState<'focus' | 'tasks' | 'coach'>('focus');
+
+  // Native Web Audio Ambient Focus Soundscapes (Zero Spotify Login Needed)
+  const [activeSoundscape, setActiveSoundscape] = useState<SoundscapeType>('off');
+  const [soundscapeVolume, setSoundscapeVolume] = useState<number>(0.38);
+
+  const handleSelectSoundscape = (type: SoundscapeType) => {
+    const next = activeSoundscape === type ? 'off' : type;
+    setActiveSoundscape(next);
+    soundscapeEngine.setVolume(soundscapeVolume);
+    soundscapeEngine.start(next);
+    trackAnonymousEvent('soundscape_changed', { soundscape: next });
+  };
+
+  useEffect(() => {
+    soundscapeEngine.setVolume(soundscapeVolume);
+  }, [soundscapeVolume]);
+
+  useEffect(() => {
+    return () => {
+      soundscapeEngine.stop();
+    };
+  }, []);
+
+  // Auto-Start Next Pomodoro Session Preference
+  const [autoStartNext, setAutoStartNext] = useState<boolean>(
+    () => localStorage.getItem('pomodoro-auto-start') === 'true'
+  );
+
+  // Focus Analytics & Daily Study Streak History
+  const [focusHistory, setFocusHistory] = useState<FocusDayLog[]>(() => {
+    const saved = localStorage.getItem('pomodoro-focus-history');
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return [];
+    }
+  });
+
+  const getTodayKey = () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const logFocusActivity = (deltaMinutes: number, deltaSessions: number, deltaTasks: number) => {
+    const todayKey = getTodayKey();
+    setFocusHistory(prev => {
+      const idx = prev.findIndex(item => item.date === todayKey);
+      let updated: FocusDayLog[];
+      if (idx >= 0) {
+        updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          minutes: updated[idx].minutes + deltaMinutes,
+          sessions: updated[idx].sessions + deltaSessions,
+          tasksCompleted: updated[idx].tasksCompleted + deltaTasks,
+        };
+      } else {
+        updated = [
+          ...prev.slice(-29),
+          {
+            date: todayKey,
+            minutes: deltaMinutes,
+            sessions: deltaSessions,
+            tasksCompleted: deltaTasks,
+          },
+        ];
+      }
+      localStorage.setItem('pomodoro-focus-history', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const focusMetrics = useMemo(() => {
+    const todayKey = getTodayKey();
+    const todayLog = focusHistory.find(d => d.date === todayKey);
+    const totalMinutes = focusHistory.reduce((acc, d) => acc + d.minutes, 0);
+    const totalSessions = focusHistory.reduce((acc, d) => acc + d.sessions, 0);
+    const totalTasksDone = focusHistory.reduce((acc, d) => acc + d.tasksCompleted, 0);
+
+    // Calculate consecutive-day study streak
+    const activeDates = new Set(
+      focusHistory.filter(d => d.minutes > 0 || d.tasksCompleted > 0).map(d => d.date)
+    );
+    let streak = 0;
+    const cursor = new Date();
+    if (!activeDates.has(todayKey)) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    for (let i = 0; i < 365; i++) {
+      const k = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(
+        cursor.getDate()
+      ).padStart(2, '0')}`;
+      if (activeDates.has(k)) {
+        streak += 1;
+        cursor.setDate(cursor.getDate() - 1);
+      } else {
+        break;
+      }
+    }
+
+    // Last 7 days bar chart data
+    const last7Days: { label: string; date: string; minutes: number }[] = [];
+    for (let offset = 6; offset >= 0; offset--) {
+      const dt = new Date();
+      dt.setDate(dt.getDate() - offset);
+      const k = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(
+        dt.getDate()
+      ).padStart(2, '0')}`;
+      const found = focusHistory.find(d => d.date === k);
+      last7Days.push({
+        label: dt.toLocaleDateString(undefined, { weekday: 'short' }),
+        date: k,
+        minutes: found ? found.minutes : 0,
+      });
+    }
+
+    return {
+      todayMinutes: todayLog?.minutes || 0,
+      todaySessions: todayLog?.sessions || 0,
+      totalMinutes,
+      totalSessions,
+      totalTasksDone,
+      streak,
+      last7Days,
+    };
+  }, [focusHistory]);
 
   // Real-time AI Theme Synthesis Loading Overlay
   const [isGeneratingTheme, setIsGeneratingTheme] = useState(false);
@@ -195,7 +356,7 @@ function App() {
   const [themeGenProgress, setThemeGenProgress] = useState(0);
   const [welcomeThemeBanner, setWelcomeThemeBanner] = useState<string | null>(null);
 
-  // Per-Email Pro Tier Status & Stripe URL Return Check
+  // Per-Email + Visitor Pro Tier Status & Stripe Checkout State ($1.99/mo or $14.99/yr)
   const [proEmails, setProEmails] = useState<string[]>(() => {
     const saved = localStorage.getItem('pomodoro-pro-emails');
     if (!saved) return [];
@@ -205,13 +366,39 @@ function App() {
       return [];
     }
   });
+  const [proVisitorUnlocked, setProVisitorUnlocked] = useState<boolean>(
+    () => localStorage.getItem('pomodoro-pro-visitor') === 'true'
+  );
   const [lockedThemeAttempt, setLockedThemeAttempt] = useState<AppTheme | null>(null);
+  const [proBillingCycle, setProBillingCycle] = useState<'monthly' | 'annual'>('monthly');
+  const [stripeCheckoutLoading, setStripeCheckoutLoading] = useState(false);
+  const [stripeStatusNotice, setStripeStatusNotice] = useState<string | null>(null);
 
   const currentGmailLower = userProfile?.gmail?.trim().toLowerCase() || '';
-  const isProMember = isOwner || (currentGmailLower ? proEmails.includes(currentGmailLower) : false);
+  const isProMember =
+    isOwner ||
+    proVisitorUnlocked ||
+    (currentGmailLower ? proEmails.includes(currentGmailLower) : false);
+
+  const isThemeUnlockedForUser = (
+    themeId: string,
+    overrideEmail?: string,
+    overrideBonusId?: string | null
+  ): boolean => {
+    if (themeId === 'dragonball') return true;
+    const bonusId = overrideBonusId !== undefined ? overrideBonusId : claimedBonusThemeId;
+    if (bonusId && themeId === bonusId) return true;
+    const checkEmail = (overrideEmail ?? currentGmailLower).trim().toLowerCase();
+    if (checkEmail && checkEmail === APP_CONFIG.OWNER_EMAIL.toLowerCase()) return true;
+    if (checkEmail && proEmails.includes(checkEmail)) return true;
+    if (proVisitorUnlocked) return true;
+    return false;
+  };
 
   const unlockProForCurrentUser = (emailToUnlock?: string) => {
     const targetEmail = (emailToUnlock || currentGmailLower).trim().toLowerCase();
+    setProVisitorUnlocked(true);
+    localStorage.setItem('pomodoro-pro-visitor', 'true');
     if (!targetEmail) return;
     setProEmails(prev => {
       if (prev.includes(targetEmail)) return prev;
@@ -224,17 +411,141 @@ function App() {
   const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string>(
     () => localStorage.getItem('pomodoro-stripe-url') || APP_CONFIG.PRO_CHECKOUT_URL
   );
+  const [stripeAnnualUrl, setStripeAnnualUrl] = useState<string>(
+    () => localStorage.getItem('pomodoro-stripe-annual-url') || APP_CONFIG.PRO_ANNUAL_CHECKOUT_URL
+  );
+  const [stripePortalUrl, setStripePortalUrl] = useState<string>(
+    () => localStorage.getItem('pomodoro-stripe-portal-url') || APP_CONFIG.STRIPE_BILLING_PORTAL_URL
+  );
 
+  // Start Verified Stripe Checkout (Serverless API on Vercel, with Stripe Payment Link fallback)
+  const handleStripeCheckout = async (plan: 'monthly' | 'annual') => {
+    setStripeStatusNotice(null);
+    const directPaymentLink = plan === 'annual' ? stripeAnnualUrl : stripeCheckoutUrl;
+
+    setStripeCheckoutLoading(true);
+    try {
+      const res = await fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          email: currentGmailLower || undefined,
+          visitorId,
+          returnUrl: window.location.origin + window.location.pathname,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.url) {
+          trackAnonymousEvent('checkout_started', { plan, via: 'stripe_api' });
+          window.location.href = data.url;
+          return;
+        }
+      }
+    } catch {
+      // Static GitHub Pages hosting falls through to Stripe Payment Link
+    } finally {
+      setStripeCheckoutLoading(false);
+    }
+
+    if (directPaymentLink) {
+      trackAnonymousEvent('checkout_started', { plan, via: 'stripe_payment_link' });
+      window.open(directPaymentLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    setStripeStatusNotice(
+      isOwner
+        ? 'Paste your Stripe Payment Link below (or set STRIPE_SECRET_KEY in Vercel) to activate live checkout.'
+        : 'Stripe checkout is being finalized! You already have Dragon Ball + 1 Free Bonus World unlocked.'
+    );
+  };
+
+  const handleOpenBillingPortal = async () => {
+    if (stripePortalUrl) {
+      window.open(stripePortalUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (currentGmailLower) {
+      try {
+        const res = await fetch('/api/create-portal-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: currentGmailLower,
+            returnUrl: window.location.href,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.url) {
+            window.location.href = data.url;
+            return;
+          }
+        }
+      } catch {
+        // Fallback notice below
+      }
+    }
+    setStripeStatusNotice(
+      `To manage or cancel a subscription anytime, use the link in your Stripe receipt email or contact ${APP_CONFIG.OWNER_EMAIL}.`
+    );
+  };
+
+  // Sign Out / Switch Account cleanly
+  const handleSignOut = () => {
+    soundscapeEngine.stop();
+    setActiveSoundscape('off');
+    setIsRunning(false);
+    localStorage.removeItem('pomodoro-user-profile');
+    setUserProfile(null);
+    setNicknameInput('');
+    setGmailInput('');
+    setOnboardingError('');
+    setShowAccountModal(false);
+    setShowOnboardingModal(true);
+    trackAnonymousEvent('user_signed_out');
+  };
+
+  // Verify Stripe Return (?pro=success) cleanly (verifies session_id on Vercel if present)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('pro') === 'success' && currentGmailLower) {
-      unlockProForCurrentUser(currentGmailLower);
-      setWelcomeThemeBanner(
-        `🎉 Welcome to Focus Arena PRO (${currentGmailLower})! All 14+ 4K Worlds & Custom Themes are unlocked!`
-      );
-      window.history.replaceState({}, '', window.location.pathname);
+    if (params.get('pro') === 'success') {
+      const sessionId = params.get('session_id');
+      const activate = (verifiedEmail?: string) => {
+        unlockProForCurrentUser(verifiedEmail || currentGmailLower);
+        setWelcomeThemeBanner(
+          `🎉 Welcome to Focus Arena PRO! All 14+ 4K Worlds & Custom Themes are now unlocked!`
+        );
+        trackAnonymousEvent('pro_unlocked', { via: sessionId ? 'stripe_verified' : 'payment_link' });
+        window.history.replaceState({}, '', window.location.pathname);
+      };
+
+      if (sessionId) {
+        fetch(`/api/stripe-webhook?session_id=${encodeURIComponent(sessionId)}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(data => {
+            if (data?.verified) {
+              activate(data.email || currentGmailLower);
+            } else {
+              activate(currentGmailLower);
+            }
+          })
+          .catch(() => activate(currentGmailLower));
+      } else {
+        activate(currentGmailLower);
+      }
     }
   }, [currentGmailLower]);
+
+  // Anonymous Active User Ping on App Load (No Email Needed to Count Active Users!)
+  useEffect(() => {
+    trackAnonymousEvent('session_start', {
+      is_guest: !userProfile?.gmail,
+      has_profile: Boolean(userProfile),
+    });
+  }, []);
 
   // Official Spotify IFrame API Controller + 1-Click Music Play / Pause
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -1344,58 +1655,125 @@ function App() {
     if (!isRunning && mode === 'Break') setTimeLeft(val * 60);
   };
 
-  // Timer Countdown Logic + Post-Session Reminder Alert
+  // Drift-Free Timestamp Timer (accurate even when iPhone/Android locks screen or desktop tab sleeps!)
+  const targetEndTimeRef = useRef<number | null>(null);
+
+  const handleApplyPomodoroPreset = (wMins: number, bMins: number) => {
+    targetEndTimeRef.current = null;
+    setIsRunning(false);
+    setIsEditingTimer(false);
+    setWorkDuration(wMins);
+    setWorkSecondsExtra(0);
+    setBreakDuration(bMins);
+    setMode('Work');
+    setTimeLeft(wMins * 60);
+  };
+
   useEffect(() => {
-    let interval: number | undefined;
-    if (isRunning && timeLeft > 0) {
-      interval = window.setInterval(() => setTimeLeft(prev => prev - 1), 1000);
-    } else if (timeLeft === 0 && isRunning) {
-      playSound('achievement');
-      setIsRunning(false);
+    if (!isRunning) {
+      targetEndTimeRef.current = null;
+      return;
+    }
 
-      // Trigger Post-Session Reminder if set!
-      if (sessionReminderText.trim()) {
-        setReminderAlertBanner(sessionReminderText.trim());
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('⏰ Post-Session Reminder — Focus Arena', {
-            body: sessionReminderText.trim(),
-          });
+    if (targetEndTimeRef.current === null && timeLeft > 0) {
+      targetEndTimeRef.current = Date.now() + timeLeft * 1000;
+    }
+
+    const syncRemaining = () => {
+      if (targetEndTimeRef.current === null) return;
+      const remaining = Math.max(0, Math.ceil((targetEndTimeRef.current - Date.now()) / 1000));
+      setTimeLeft(prev => (prev !== remaining ? remaining : prev));
+    };
+
+    const interval = window.setInterval(syncRemaining, 250);
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible') syncRemaining();
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisChange);
+    };
+  }, [isRunning]);
+
+  // Session Completion Handler (Rewards, Streak Logging, Browser Notification & Auto-Next)
+  useEffect(() => {
+    if (timeLeft !== 0 || !isRunning) return;
+
+    targetEndTimeRef.current = null;
+    playSound('achievement');
+
+    if (sessionReminderText.trim()) {
+      setReminderAlertBanner(sessionReminderText.trim());
+    }
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(
+        mode === 'Work' ? '⚡ Focus Session Complete!' : '⏱️ Break Over — Back to Focus!',
+        {
+          body: sessionReminderText.trim() || `Nice work, ${userProfile?.nickname || assistantName}!`,
         }
-      }
+      );
+    }
 
-      if (mode === 'Work') {
-        const nextPower = powerLevel + APP_CONFIG.POWER_PER_POMODORO;
-        setPowerLevel(nextPower);
-        handleAIInteraction(
-          `The Work session has elapsed! What should I prioritize next?`,
-          nextPower
-        );
-        setMode('Break');
-        setTimeLeft(breakDuration * 60);
+    if (mode === 'Work') {
+      const completedMins = Math.max(1, Math.round((workDuration * 60 + workSecondsExtra) / 60));
+      logFocusActivity(completedMins, 1, 0);
+      trackAnonymousEvent('pomodoro_completed', { minutes: completedMins, theme: activeTheme.id });
+
+      const nextPower = powerLevel + APP_CONFIG.POWER_PER_POMODORO;
+      setPowerLevel(nextPower);
+      handleAIInteraction(
+        `The Work session has elapsed! What should I prioritize next?`,
+        nextPower
+      );
+      const nextSecs = breakDuration * 60;
+      setMode('Break');
+      setTimeLeft(nextSecs);
+      if (autoStartNext) {
+        targetEndTimeRef.current = Date.now() + nextSecs * 1000;
       } else {
-        handleAIInteraction(`Break is over! Ready to jump back into Work mode.`);
-        setMode('Work');
-        setTimeLeft(Math.max(1, workDuration * 60 + workSecondsExtra));
+        setIsRunning(false);
+      }
+    } else {
+      handleAIInteraction(`Break is over! Ready to jump back into Work mode.`);
+      const nextSecs = Math.max(1, workDuration * 60 + workSecondsExtra);
+      setMode('Work');
+      setTimeLeft(nextSecs);
+      if (autoStartNext) {
+        targetEndTimeRef.current = Date.now() + nextSecs * 1000;
+      } else {
+        setIsRunning(false);
       }
     }
-    return () => clearInterval(interval);
   }, [
-    isRunning,
     timeLeft,
+    isRunning,
     mode,
     workDuration,
     workSecondsExtra,
     breakDuration,
     powerLevel,
     sessionReminderText,
+    autoStartNext,
   ]);
 
   const toggleTimer = () => {
-    if (!isRunning) playSound('hum');
-    setIsRunning(!isRunning);
+    if (!isRunning) {
+      playSound('hum');
+      targetEndTimeRef.current = Date.now() + timeLeft * 1000;
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => {});
+      }
+      setIsRunning(true);
+    } else {
+      targetEndTimeRef.current = null;
+      setIsRunning(false);
+    }
   };
 
   const switchMode = (newMode: 'Work' | 'Break') => {
+    targetEndTimeRef.current = null;
     setIsRunning(false);
     setMode(newMode);
     setTimeLeft(
@@ -1422,6 +1800,7 @@ function App() {
 
     if (nextCompleted) {
       playSound('ding');
+      logFocusActivity(0, 0, 1);
       const nextPower = powerLevel + APP_CONFIG.POWER_PER_TASK;
       setPowerLevel(nextPower);
       setBurstTrigger(prev => prev + 1);
@@ -1511,18 +1890,16 @@ function App() {
     }
   };
 
-  // Pre-Built 4K World Synthesis Pipeline (Free Tier = Dragon Ball; Pro Tier = All 14+ 4K Worlds)
-  const triggerThemeGenerationWithLoading = (promptValue: string, overrideGmail?: string) => {
+  // Pre-Built 4K World Synthesis Pipeline (Free Tier = Dragon Ball + 1 Free Bonus Paid World; Pro = All 14+ Worlds)
+  const triggerThemeGenerationWithLoading = (
+    promptValue: string,
+    overrideGmail?: string,
+    overrideBonusId?: string | null
+  ) => {
     const clean = promptValue.trim() || 'Dragon Ball';
     setThemePromptInput(clean);
     const resolved = resolveThemeFromPrompt(clean);
-
-    const checkEmail = (overrideGmail ?? currentGmailLower).trim().toLowerCase();
-    const hasProAccess =
-      checkEmail === APP_CONFIG.OWNER_EMAIL.toLowerCase() ||
-      (checkEmail ? proEmails.includes(checkEmail) : false);
-
-    // Free Tier Gate: If pro theme picked by free user, still run the 4K loading sequence so user sees progress!
+    const unlocked = isThemeUnlockedForUser(resolved.id, overrideGmail, overrideBonusId);
 
     setLockedThemeAttempt(null);
     setIsGeneratingTheme(true);
@@ -1532,7 +1909,7 @@ function App() {
     setTimeout(() => {
       setThemeGenProgress(54);
       setThemeGenStage(`Synthesizing 4K Widescreen Environment (${resolved.name})...`);
-    }, 520);
+    }, 380);
 
     setTimeout(() => {
       setThemeGenProgress(86);
@@ -1554,42 +1931,82 @@ function App() {
           localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
         }
         setIsGeneratingTheme(false);
-        if (resolved.id !== 'dragonball' && !hasProAccess) {
+        trackAnonymousEvent('theme_activated', { theme: resolved.id, unlocked });
+
+        if (!unlocked) {
           setLockedThemeAttempt(resolved);
-          setWelcomeThemeBanner(`✨ Free Preview Active: ${resolved.name}! Upgrade to Pro ($2.99/mo) to unlock permanently.`);
-          setTimeout(() => setShowProModal(true), 3200);
+          setWelcomeThemeBanner(
+            `✨ Live Preview: ${resolved.name}! Upgrade to Pro (${APP_CONFIG.PRO_PRICE_DISPLAY}) to unlock all 14+ worlds.`
+          );
+          setTimeout(() => setShowProModal(true), 2800);
         } else {
           setLockedThemeAttempt(null);
           setWelcomeThemeBanner(`✨ Welcome to your 4K World: ${resolved.name}!`);
         }
         playSound('achievement');
-        setTimeout(() => setWelcomeThemeBanner(null), 6000);
-      }, 600);
-    }, 1050);
+        setTimeout(() => setWelcomeThemeBanner(null), 5500);
+      }, 420);
+    }, 760);
   };
 
-  // Onboarding & Gmail Sign-In Handler + Automated Email Notification
-  const handleOnboardingSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanNickname = nicknameInput.trim();
-    const cleanGmail = gmailInput.trim().toLowerCase();
-    const cleanPrompt = themePromptInput.trim() || 'Dragon Ball';
+  // Claim 1 Free Additional Paid World permanently for new users
+  const handleClaimBonusWorld = (themeId: string) => {
+    if (claimedBonusThemeId || themeId === 'dragonball') return;
+    const chosen = PRESET_THEMES[themeId];
+    if (!chosen) return;
+    setClaimedBonusThemeId(themeId);
+    localStorage.setItem('pomodoro-bonus-theme-id', themeId);
+    if (userProfile) {
+      const updated = { ...userProfile, claimedBonusThemeId: themeId };
+      setUserProfile(updated);
+      localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
+    }
+    trackAnonymousEvent('bonus_world_claimed', { bonus_theme: themeId }, webhookUrl);
+    triggerThemeGenerationWithLoading(chosen.interestPrompt, undefined, themeId);
+  };
+
+  // Onboarding Handler: Supports Both Zero-Friction Guest Mode (No Email) & Optional Email + 1 Free Bonus Paid Theme
+  const completeOnboarding = (asGuest: boolean) => {
+    const cleanNickname = nicknameInput.trim() || (asGuest ? 'FocusWarrior' : '');
+    const cleanGmail = asGuest ? '' : gmailInput.trim().toLowerCase();
 
     if (!cleanNickname) {
-      setOnboardingError('Please enter a nickname for your persona.');
+      setOnboardingError('Please enter a nickname (or click Quick Start as Guest).');
       return;
     }
-    if (!cleanGmail || !cleanGmail.includes('@')) {
-      setOnboardingError('Please sign in with a valid Gmail address (e.g. yourname@gmail.com).');
+    if (!asGuest && cleanGmail && !cleanGmail.includes('@')) {
+      setOnboardingError('Please enter a valid email address, or leave it blank for Guest Mode.');
       return;
     }
 
+    // Lock in their 1 Free Additional Paid Theme choice (if not already claimed)
+    const effectiveBonusId =
+      claimedBonusThemeId ||
+      (onboardingBonusChoice && onboardingBonusChoice !== 'dragonball'
+        ? onboardingBonusChoice
+        : 'sololeveling');
+
+    if (!claimedBonusThemeId && effectiveBonusId) {
+      setClaimedBonusThemeId(effectiveBonusId);
+      localStorage.setItem('pomodoro-bonus-theme-id', effectiveBonusId);
+    }
+
+    const bonusThemeObj = PRESET_THEMES[effectiveBonusId] || PRESET_THEMES.dragonball;
+    const launchPrompt =
+      themePromptInput.trim() && themePromptInput.trim() !== 'Dragon Ball'
+        ? themePromptInput.trim()
+        : bonusThemeObj.interestPrompt;
+
     const now = new Date().toISOString();
-    const isNewUser = !userRegistry.some(u => u.gmail === cleanGmail);
+    const profileKey = cleanGmail || visitorId;
+    const isNewUser = !userRegistry.some(u => (u.gmail || u.visitorId) === profileKey);
     const newProfile: UserProfile = {
       nickname: cleanNickname,
       gmail: cleanGmail,
-      interestPrompt: cleanPrompt,
+      visitorId,
+      isGuest: !cleanGmail,
+      claimedBonusThemeId: effectiveBonusId,
+      interestPrompt: launchPrompt,
       joinedAt: userProfile?.joinedAt || now,
       lastActive: now,
     };
@@ -1598,7 +2015,7 @@ function App() {
     localStorage.setItem('pomodoro-user-profile', JSON.stringify(newProfile));
     setAssistantName(cleanNickname.toUpperCase());
 
-    const existingIdx = userRegistry.findIndex(u => u.gmail === cleanGmail);
+    const existingIdx = userRegistry.findIndex(u => (u.gmail || u.visitorId) === profileKey);
     let updatedRegistry: UserProfile[];
     if (existingIdx >= 0) {
       updatedRegistry = [...userRegistry];
@@ -1609,31 +2026,49 @@ function App() {
     setUserRegistry(updatedRegistry);
     localStorage.setItem('pomodoro-user-registry', JSON.stringify(updatedRegistry));
 
+    trackAnonymousEvent(
+      'onboarding_completed',
+      {
+        is_guest: !cleanGmail,
+        bonus_world: effectiveBonusId,
+        theme: launchPrompt,
+      },
+      webhookUrl
+    );
+
     if (isNewUser) {
       addAdminNotification({
         type: 'new_user',
         nickname: cleanNickname,
-        gmail: cleanGmail,
-        message: `New user signed in with theme interest: "${cleanPrompt}"`,
+        gmail: cleanGmail || `Guest (${visitorId})`,
+        message: `${cleanGmail ? 'Signed in' : 'Joined as Guest'} • Free Bonus World: ${bonusThemeObj.name}`,
       });
 
-      sendEmailToOwner(
-        `🚀 New Focus Arena User Sign-In: ${cleanNickname} (${cleanGmail})`,
-        {
-          Event: 'New User Sign-In',
-          Nickname: cleanNickname,
-          User_Gmail: cleanGmail,
-          Selected_Theme: cleanPrompt,
-          Timestamp: new Date().toLocaleString(),
-          _autoresponse: `Welcome to Focus Arena (AI Pomodoro) by Ammar Akhund! Thank you for signing in, ${cleanNickname}. Your custom ${cleanPrompt} workspace is ready. We appreciate your feedback anytime!`,
-        },
-        webhookUrl
-      );
+      if (cleanGmail) {
+        sendEmailToOwner(
+          `🚀 New Focus Arena User: ${cleanNickname} (${cleanGmail})`,
+          {
+            Event: 'New User Sign-In',
+            Nickname: cleanNickname,
+            User_Gmail: cleanGmail,
+            Visitor_ID: visitorId,
+            Bonus_World: bonusThemeObj.name,
+            Selected_Theme: launchPrompt,
+            Timestamp: new Date().toLocaleString(),
+          },
+          webhookUrl
+        );
+      }
     }
 
     setOnboardingError('');
     setShowOnboardingModal(false);
-    triggerThemeGenerationWithLoading(cleanPrompt, cleanGmail);
+    triggerThemeGenerationWithLoading(launchPrompt, cleanGmail, effectiveBonusId);
+  };
+
+  const handleOnboardingSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    completeOnboarding(false);
   };
 
   // Submit Instant 5-Star In-App Feedback
@@ -1798,7 +2233,6 @@ function App() {
   const secs = (timeLeft % 60).toString().padStart(2, '0');
   const completedCount = tasks.filter(t => t.completed).length;
   const progressTo9000 = Math.min(100, Math.round((powerLevel / APP_CONFIG.OVER_9000_THRESHOLD) * 100));
-  const previewTheme = resolveThemeFromPrompt(themePromptInput);
   const activeUsersCount = Math.max(1, userRegistry.length);
 
   return (
@@ -1810,14 +2244,40 @@ function App() {
           : activeTheme.bgCssGradient,
       }}
     >
-      {/* 3D Interactive Core Canvas */}
+      {/* 3D Interactive Core Canvas (Code-Split Lazy Loaded for Fast Mobile Startup) */}
       <div className="canvas-container">
-        <AvatarCanvas
-          mode={mode}
-          isRunning={isRunning}
-          theme={activeTheme}
-          burstTrigger={burstTrigger}
-        />
+        <Suspense
+          fallback={
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              <div
+                style={{
+                  width: '150px',
+                  height: '150px',
+                  borderRadius: '50%',
+                  background: `radial-gradient(circle, ${activeTheme.accent}, ${activeTheme.primary} 60%, transparent)`,
+                  opacity: 0.45,
+                  filter: 'blur(6px)',
+                }}
+              />
+            </div>
+          }
+        >
+          <AvatarCanvas
+            mode={mode}
+            isRunning={isRunning}
+            theme={activeTheme}
+            burstTrigger={burstTrigger}
+          />
+        </Suspense>
       </div>
 
       {/* Real-Time AI Theme Generation Processing Overlay */}
@@ -1926,16 +2386,15 @@ function App() {
           onClick={() => {
             setNicknameInput(userProfile?.nickname || assistantName);
             setGmailInput(userProfile?.gmail || '');
-            setThemePromptInput(activeTheme.interestPrompt);
-            setShowOnboardingModal(true);
+            setShowAccountModal(true);
           }}
-          title="Edit Nickname, Gmail Sign-In, or Interest"
+          title="Account, Bonus World & Sign Out"
         >
           <span>
-            {isOwner ? '👑 ' : '👤 '}
+            {isOwner ? '👑 ' : userProfile?.gmail ? '👤 ' : '⚡ '}
             {userProfile?.nickname || assistantName}
           </span>
-          {(isProMember || isOwner) && (
+          {isProMember || isOwner ? (
             <span
               style={{
                 background: 'linear-gradient(135deg, #facc15, #f97316)',
@@ -1948,6 +2407,19 @@ function App() {
             >
               PRO
             </span>
+          ) : (
+            <span
+              style={{
+                background: 'rgba(255,255,255,0.12)',
+                color: '#cbd5e1',
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                padding: '1px 6px',
+                borderRadius: '999px',
+              }}
+            >
+              {userProfile?.gmail ? 'FREE' : 'GUEST'}
+            </span>
           )}
         </button>
 
@@ -1957,6 +2429,17 @@ function App() {
           title="Customize or Generate AI Theme by Interest"
         >
           🎨 {activeTheme.badge}
+        </button>
+
+        <button
+          className="nav-pill"
+          onClick={() => setShowStatsModal(true)}
+          style={{
+            borderColor: focusMetrics.streak > 0 ? '#fb923c' : 'rgba(255,255,255,0.16)',
+          }}
+          title="Focus Analytics, Daily Minutes & Study Streak"
+        >
+          {focusMetrics.streak > 0 ? `🔥 ${focusMetrics.streak}d Streak` : '📊 Stats'}
         </button>
 
         <button
@@ -2039,7 +2522,7 @@ function App() {
             background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.28), rgba(59, 130, 246, 0.25))',
             borderColor: '#facc15',
           }}
-          title="Explore Focus Arena Pro ($2.99/mo) & All 14+ 4K Worlds"
+          title={`Explore Focus Arena Pro (${APP_CONFIG.PRO_PRICE_DISPLAY}) & All 14+ 4K Worlds`}
         >
           💎 Pro
         </button>
@@ -2098,6 +2581,62 @@ function App() {
           >
             Done ▾
           </button>
+        </div>
+
+        {/* Built-In Native Focus Soundscapes (Works Offline & Without Spotify Login) */}
+        <div
+          style={{
+            padding: '0.6rem 0.7rem',
+            borderRadius: '12px',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#e2e8f0' }}>
+              🌊 Built-In Ambient Soundscapes (No Login Needed)
+            </span>
+            {activeSoundscape !== 'off' && (
+              <span style={{ fontSize: '0.68rem', color: '#4ade80', fontWeight: 700 }}>● Playing</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+            {(
+              [
+                { id: 'rain', label: '🌧️ Rain' },
+                { id: 'brown', label: '🌊 Brown Noise' },
+                { id: 'lofi', label: '🌌 Cosmic Lo-Fi' },
+                { id: 'off', label: '🔇 Off' },
+              ] as { id: SoundscapeType; label: string }[]
+            ).map(sc => (
+              <button
+                key={sc.id}
+                type="button"
+                className={`theme-chip ${activeSoundscape === sc.id ? 'selected' : ''}`}
+                style={{ fontSize: '0.7rem', padding: '0.26rem 0.58rem' }}
+                onClick={() => handleSelectSoundscape(sc.id)}
+              >
+                {sc.label}
+              </button>
+            ))}
+          </div>
+          {activeSoundscape !== 'off' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+              <span>Vol</span>
+              <input
+                type="range"
+                min="0.05"
+                max="0.9"
+                step="0.05"
+                value={soundscapeVolume}
+                onChange={e => setSoundscapeVolume(parseFloat(e.target.value))}
+                style={{ flex: 1, accentColor: 'var(--primary)' }}
+              />
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -2175,7 +2714,7 @@ function App() {
         )}
       </div>
 
-      {/* Creator Branding Footer Bar */}
+      {/* Creator Branding & Legal Trust Footer Bar */}
       <div className="creator-footer-bar">
         <span>
           ⚡ Built by <strong>{APP_CONFIG.OWNER_NAME}</strong>
@@ -2190,15 +2729,29 @@ function App() {
         </a>
         <span>•</span>
         <span
+          style={{ cursor: 'pointer', color: '#cbd5e1' }}
+          onClick={() => setShowLegalModal('privacy')}
+        >
+          Privacy
+        </span>
+        <span>•</span>
+        <span
+          style={{ cursor: 'pointer', color: '#cbd5e1' }}
+          onClick={() => setShowLegalModal('terms')}
+        >
+          Terms
+        </span>
+        <span>•</span>
+        <span
           style={{ cursor: 'pointer', color: '#fde047', fontWeight: 700 }}
           onClick={() => setShowProModal(true)}
         >
-          💎 Focus Arena Pro ({APP_CONFIG.PRO_PRICE_DISPLAY})
+          💎 Pro ({APP_CONFIG.PRO_PRICE_DISPLAY})
         </span>
       </div>
 
       {/* Main Two-Panel Floating UI */}
-      <div className="ui-layer">
+      <div className={`ui-layer mobile-tab-${mobileTab}`}>
         {/* Left Panel: Persona Assistant Chat */}
         <div className={`panel-wrapper panel-wrapper-left ${isLeftOpen ? '' : 'closed'}`}>
           <div className="panel panel-left">
@@ -2578,10 +3131,63 @@ function App() {
               </button>
             </div>
 
+            {/* 1-Click Pomodoro Presets & Auto-Start Toggle */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '6px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                {[
+                  { label: '25/5', w: 25, b: 5 },
+                  { label: '50/10', w: 50, b: 10 },
+                  { label: '90/20', w: 90, b: 20 },
+                ].map(p => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    className={`theme-chip ${workDuration === p.w && breakDuration === p.b && workSecondsExtra === 0 ? 'selected' : ''}`}
+                    style={{ fontSize: '0.68rem', padding: '0.2rem 0.55rem' }}
+                    onClick={() => handleApplyPomodoroPreset(p.w, p.b)}
+                    title={`Set ${p.w} min Focus / ${p.b} min Break`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <label
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '0.7rem',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  userSelect: 'none',
+                }}
+                title="Automatically start the next Work/Break round when timer hits 00:00"
+              >
+                <input
+                  type="checkbox"
+                  checked={autoStartNext}
+                  onChange={e => {
+                    setAutoStartNext(e.target.checked);
+                    localStorage.setItem('pomodoro-auto-start', String(e.target.checked));
+                  }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                Auto-next
+              </label>
+            </div>
+
             <div style={{ height: '1px', background: 'var(--glass-border)', margin: '0.2rem 0' }} />
 
             {/* Power Level + Progress to 9,000 + Reset Controls */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div id="tasks-section-anchor" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h3 style={{ fontSize: '1.05rem' }}>Your Tasks</h3>
@@ -2969,7 +3575,56 @@ function App() {
         </div>
       </div>
 
-      {/* MODAL 1: Onboarding Gate (Nickname + Gmail Sign-In + Interest Theme Prompt) */}
+      {/* Native-Style Mobile Bottom Navigation Bar (Visible on Phones < 768px) */}
+      <nav className="mobile-bottom-nav" aria-label="Mobile Navigation">
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'focus' ? 'active' : ''}`}
+          onClick={() => {
+            setMobileTab('focus');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        >
+          <span>⏱️</span>
+          <span>Focus</span>
+        </button>
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'tasks' ? 'active' : ''}`}
+          onClick={() => {
+            setMobileTab('tasks');
+            setTimeout(() => {
+              document
+                .getElementById('tasks-section-anchor')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }, 60);
+          }}
+        >
+          <span>✅</span>
+          <span>Tasks ({tasks.filter(t => !t.completed).length})</span>
+        </button>
+        <button
+          type="button"
+          className={`mobile-nav-item ${mobileTab === 'coach' ? 'active' : ''}`}
+          onClick={() => {
+            setMobileTab('coach');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        >
+          <span>🤖</span>
+          <span>AI Coach</span>
+        </button>
+        <button
+          type="button"
+          className="mobile-nav-item"
+          onClick={() => setShowThemeModal(true)}
+        >
+          <span>🎨</span>
+          <span>Worlds</span>
+        </button>
+      </nav>
+
+      {/* MODAL 1: Privacy-First Onboarding (Guest Mode OR Optional Email + 1 Free Bonus Paid World!) */}
       {showOnboardingModal && (
         <div className="modal-backdrop">
           <form className="modal-card" onSubmit={handleOnboardingSubmit}>
@@ -2977,7 +3632,7 @@ function App() {
               <div>
                 <h2>Welcome to Focus Arena</h2>
                 <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: '2px' }}>
-                  Created by {APP_CONFIG.OWNER_NAME} ({APP_CONFIG.OWNER_HANDLE})
+                  3D AI Pomodoro Workspace • By {APP_CONFIG.OWNER_NAME}
                 </div>
               </div>
               {userProfile && (
@@ -2991,29 +3646,12 @@ function App() {
                 </button>
               )}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-              <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.5, flex: 1, minWidth: '220px' }}>
-                Sign in with your Gmail, choose your persona nickname, and select ANY interest or theme to generate your custom 3D workspace!
-              </p>
-              <button
-                type="button"
-                className="outline"
-                style={{
-                  fontSize: '0.72rem',
-                  padding: '3px 8px',
-                  borderColor: 'var(--primary)',
-                  color: '#c084fc',
-                  whiteSpace: 'nowrap',
-                }}
-                onClick={() => {
-                  setNicknameInput('XAKHUNDX');
-                  setGmailInput(APP_CONFIG.OWNER_EMAIL);
-                  setThemePromptInput('Dragon Ball');
-                }}
-              >
-                ⚡ 1-Tap Sign-In ({APP_CONFIG.OWNER_NAME})
-              </button>
-            </div>
+
+            <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Start instantly as a <strong>Guest</strong> or add an optional email. Every new user
+              gets <strong>Dragon Ball Super</strong> + <strong>1 Free Bonus Paid World</strong>{' '}
+              unlocked forever!
+            </p>
 
             {onboardingError && (
               <div
@@ -3037,78 +3675,100 @@ function App() {
               <input
                 type="text"
                 className="input-field"
-                placeholder="e.g., XAKHUNDX, SaiyanCoder, RickGrimes..."
+                placeholder="e.g., SaiyanCoder, ShadowMonarch, StudyAce..."
                 value={nicknameInput}
                 onChange={e => setNicknameInput(e.target.value)}
-                required
               />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0' }}>
-                2. Gmail Sign-In (Private & Secure — Never Shown Publicly)
+                2. Email{' '}
+                <span style={{ fontWeight: 500, color: '#94a3b8' }}>
+                  (Optional — leave blank to continue privately as Guest)
+                </span>
               </label>
               <input
                 type="email"
                 className="input-field"
-                placeholder="yourname@gmail.com"
+                placeholder="Optional: yourname@gmail.com (for Pro receipts & sync)"
                 value={gmailInput}
                 onChange={e => setGmailInput(e.target.value)}
-                required
               />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#e2e8f0' }}>
-                3. Type ANY Interest or Theme (AI Real-Time Generator)
+              <label style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fde047' }}>
+                🎁 3. Pick Your 1 FREE Bonus Paid World (Unlocked Forever!)
               </label>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="e.g., Black Clover, The Last of Us, Dragon Ball, One Piece..."
-                value={themePromptInput}
-                onChange={e => setThemePromptInput(e.target.value)}
-              />
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '-4px' }}>
+                Dragon Ball Super is always included free — choose 1 additional 4K world below:
+              </div>
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
-                {Object.values(PRESET_THEMES).map(preset => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={`theme-chip ${
-                      previewTheme.id === preset.id ? 'selected' : ''
-                    }`}
-                    onClick={() => setThemePromptInput(preset.interestPrompt)}
-                  >
-                    {preset.badge}
-                  </button>
-                ))}
+                {Object.values(PRESET_THEMES)
+                  .filter(p => p.id !== 'dragonball')
+                  .map(preset => {
+                    const isSelected = onboardingBonusChoice === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        className={`theme-chip ${isSelected ? 'selected' : ''}`}
+                        onClick={() => {
+                          setOnboardingBonusChoice(preset.id);
+                          setThemePromptInput(preset.interestPrompt);
+                        }}
+                      >
+                        {preset.badge}
+                      </button>
+                    );
+                  })}
               </div>
-              <div
-                style={{
-                  marginTop: '4px',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: '12px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                  fontSize: '0.78rem',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span>
-                  AI Theme Preview:{' '}
-                  <strong style={{ color: previewTheme.primary }}>{previewTheme.name}</strong>
-                </span>
-                <span style={{ opacity: 0.8 }}>
-                  {previewTheme.personas.map(p => p.characterName).join(', ')}
-                </span>
-              </div>
+              {PRESET_THEMES[onboardingBonusChoice] && (
+                <div
+                  style={{
+                    marginTop: '4px',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '12px',
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid rgba(74, 222, 128, 0.35)',
+                    fontSize: '0.78rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '8px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span>
+                    🎁 Free Bonus Selected:{' '}
+                    <strong style={{ color: '#86efac' }}>
+                      {PRESET_THEMES[onboardingBonusChoice].name}
+                    </strong>
+                  </span>
+                  <span style={{ opacity: 0.85, fontSize: '0.72rem' }}>
+                    {PRESET_THEMES[onboardingBonusChoice].personas
+                      .map(p => p.characterName)
+                      .join(', ')}
+                  </span>
+                </div>
+              )}
             </div>
 
-            <button type="submit" style={{ width: '100%', padding: '0.9rem', fontSize: '1rem' }}>
-              🚀 Generate & Launch {previewTheme.name}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button type="submit" style={{ width: '100%', padding: '0.9rem', fontSize: '0.98rem' }}>
+                🚀 Claim Free Bonus & Launch{' '}
+                {PRESET_THEMES[onboardingBonusChoice]?.name || 'Focus Arena'}
+              </button>
+              <button
+                type="button"
+                className="outline"
+                style={{ width: '100%', padding: '0.7rem', fontSize: '0.86rem' }}
+                onClick={() => completeOnboarding(true)}
+              >
+                ⚡ Quick Start as Guest (No Email Needed)
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -3128,10 +3788,8 @@ function App() {
               </button>
             </div>
             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Type <strong>any</strong> anime, show, game, or interest below (e.g.,{' '}
-              <strong>Black Clover</strong>, <strong>The Last of Us</strong>,{' '}
-              <strong>Solo Leveling</strong>, <strong>One Piece</strong>) to generate a custom 4K
-              environment, 3D orb, and character personas in real time!
+              Type <strong>any</strong> anime, show, game, or sport below to switch your 4K
+              environment, 3D orb, and AI personas instantly!
             </p>
 
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -3149,6 +3807,7 @@ function App() {
                 }}
               />
               <button
+                type="button"
                 onClick={() => {
                   setShowThemeModal(false);
                   triggerThemeGenerationWithLoading(themePromptInput);
@@ -3158,76 +3817,176 @@ function App() {
               </button>
             </div>
 
-            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Instant 4K Worlds ({Object.keys(PRESET_THEMES).length} Pre-Built Universes):</span>
+            <div
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: '#cbd5e1',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '6px',
+              }}
+            >
+              <span>Instant 4K Worlds ({Object.keys(PRESET_THEMES).length} Pre-Built):</span>
               <span style={{ fontSize: '0.72rem', color: isProMember || isOwner ? '#4ade80' : '#fbbf24' }}>
-                {isProMember || isOwner ? '💎 Pro Unlocked: All Worlds Active' : '🆓 Free Tier: Dragon Ball Free • Pro ($2.99/mo) unlocks all'}
+                {isProMember || isOwner
+                  ? '💎 Pro Unlocked: All Worlds Active'
+                  : claimedBonusThemeId
+                  ? `🎁 Free: Dragon Ball + ${PRESET_THEMES[claimedBonusThemeId]?.badge || '1 Bonus'} • Pro ${APP_CONFIG.PRO_PRICE_DISPLAY}`
+                  : `🎁 Pick 1 Free Bonus World below! • Pro ${APP_CONFIG.PRO_PRICE_DISPLAY}`}
               </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '380px', overflowY: 'auto', paddingRight: '4px' }}>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                maxHeight: '380px',
+                overflowY: 'auto',
+                paddingRight: '4px',
+              }}
+            >
               {Object.values(PRESET_THEMES).map(preset => {
                 const isFreeTheme = preset.id === 'dragonball';
-                const isLockedForUser = !isFreeTheme && !isProMember && !isOwner;
+                const isBonusTheme = claimedBonusThemeId === preset.id;
+                const isLockedForUser = !isThemeUnlockedForUser(preset.id);
+                const canClaimBonusHere = !isFreeTheme && !claimedBonusThemeId && !isProMember && !isOwner;
                 return (
-                <div
-                  key={preset.id}
-                  onClick={() => {
-                    setShowThemeModal(false);
-                    triggerThemeGenerationWithLoading(preset.interestPrompt);
-                  }}
-                  style={{
-                    padding: '0.85rem 1rem',
-                    borderRadius: '14px',
-                    background:
-                      activeTheme.id === preset.id
-                        ? 'rgba(255,255,255,0.12)'
-                        : 'rgba(255,255,255,0.04)',
-                    border:
-                      activeTheme.id === preset.id
-                        ? `2px solid ${preset.primary}`
-                        : '1px solid rgba(255,255,255,0.1)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    opacity: isLockedForUser ? 0.88 : 1,
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span>{preset.badge} — {preset.name}</span>
-                      {isFreeTheme ? (
-                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(34,197,94,0.2)', border: '1px solid #4ade80', color: '#86efac', fontWeight: 800 }}>
-                          FREE TIER
-                        </span>
-                      ) : isLockedForUser ? (
-                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(251,191,36,0.2)', border: '1px solid #fbbf24', color: '#fde047', fontWeight: 800 }}>
-                          🔒 PRO $2.99
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: '0.65rem', padding: '2px 7px', borderRadius: '999px', background: 'rgba(56,189,248,0.18)', border: '1px solid #38bdf8', color: '#bae6fd', fontWeight: 800 }}>
-                          💎 PRO UNLOCKED
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      Orb & Personas: {preset.personas.map(p => p.characterName).join(' • ')}
-                    </div>
-                  </div>
                   <div
-                    style={{
-                      width: '34px',
-                      height: '34px',
-                      borderRadius: '50%',
-                      background: preset.orbImageUrl
-                        ? `url(${preset.orbImageUrl}) center/cover`
-                        : `linear-gradient(135deg, ${preset.primary}, ${preset.secondary})`,
-                      boxShadow: `0 0 12px ${preset.primary}`,
-                      border: `1px solid ${preset.primary}`,
-                      flexShrink: 0,
+                    key={preset.id}
+                    onClick={() => {
+                      setShowThemeModal(false);
+                      if (canClaimBonusHere) {
+                        handleClaimBonusWorld(preset.id);
+                      } else {
+                        triggerThemeGenerationWithLoading(preset.interestPrompt);
+                      }
                     }}
-                  />
-                </div>
+                    style={{
+                      padding: '0.85rem 1rem',
+                      borderRadius: '14px',
+                      background:
+                        activeTheme.id === preset.id
+                          ? 'rgba(255,255,255,0.12)'
+                          : 'rgba(255,255,255,0.04)',
+                      border:
+                        activeTheme.id === preset.id
+                          ? `2px solid ${preset.primary}`
+                          : '1px solid rgba(255,255,255,0.1)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '10px',
+                      opacity: isLockedForUser ? 0.9 : 1,
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          fontWeight: 800,
+                          fontSize: '0.94rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span>
+                          {preset.badge} — {preset.name}
+                        </span>
+                        {isFreeTheme ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              background: 'rgba(34,197,94,0.2)',
+                              border: '1px solid #4ade80',
+                              color: '#86efac',
+                              fontWeight: 800,
+                            }}
+                          >
+                            FREE TIER
+                          </span>
+                        ) : isBonusTheme ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              background: 'rgba(34,197,94,0.22)',
+                              border: '1px solid #4ade80',
+                              color: '#bbf7d0',
+                              fontWeight: 800,
+                            }}
+                          >
+                            🎁 YOUR FREE BONUS
+                          </span>
+                        ) : canClaimBonusHere ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              background: 'rgba(168,85,247,0.25)',
+                              border: '1px solid #c084fc',
+                              color: '#e9d5ff',
+                              fontWeight: 800,
+                            }}
+                          >
+                            🎁 CLAIM 1 FREE
+                          </span>
+                        ) : isLockedForUser ? (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              background: 'rgba(251,191,36,0.2)',
+                              border: '1px solid #fbbf24',
+                              color: '#fde047',
+                              fontWeight: 800,
+                            }}
+                          >
+                            🔒 PRO $1.99
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '0.65rem',
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              background: 'rgba(56,189,248,0.18)',
+                              border: '1px solid #38bdf8',
+                              color: '#bae6fd',
+                              fontWeight: 800,
+                            }}
+                          >
+                            💎 PRO UNLOCKED
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                        Orb & Personas: {preset.personas.map(p => p.characterName).join(' • ')}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        width: '34px',
+                        height: '34px',
+                        borderRadius: '50%',
+                        background: preset.orbImageUrl
+                          ? `url(${preset.orbImageUrl}) center/cover`
+                          : `linear-gradient(135deg, ${preset.primary}, ${preset.secondary})`,
+                        boxShadow: `0 0 12px ${preset.primary}`,
+                        border: `1px solid ${preset.primary}`,
+                        flexShrink: 0,
+                      }}
+                    />
+                  </div>
                 );
               })}
             </div>
@@ -3749,19 +4508,19 @@ function App() {
         </div>
       )}
 
-      {/* MODAL 7: Product Showcase, Creator Branding & Pro Tier ($2.99/mo + Stripe) */}
+      {/* MODAL 7: Product Showcase, Creator Branding & Pro Tier ($1.99/mo or $14.99/yr + Verified Stripe) */}
       {showProModal && (
         <div className="modal-backdrop" onClick={() => setShowProModal(false)}>
           <div
             className="modal-card"
-            style={{ maxWidth: '660px' }}
+            style={{ maxWidth: '680px' }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h2>⚡ Focus Arena — By {APP_CONFIG.OWNER_NAME}</h2>
+                <h2>⚡ Focus Arena Pro</h2>
                 <div style={{ fontSize: '0.78rem', color: 'var(--accent)', marginTop: '2px' }}>
-                  Next-Gen 3D Gamified AI Productivity Workspace
+                  Unlock all 14+ 4K Worlds, Deep Focus Tools & Priority Upgrades
                 </div>
               </div>
               <button
@@ -3788,10 +4547,12 @@ function App() {
               >
                 <div>
                   <div style={{ fontWeight: 800, color: '#fde047', fontSize: '0.9rem' }}>
-                    🔒 &ldquo;{lockedThemeAttempt?.name || 'Selected World'}&rdquo; is a Focus Arena Pro World!
+                    🔒 &ldquo;{lockedThemeAttempt?.name || 'Selected World'}&rdquo; is a Pro World
                   </div>
                   <div style={{ fontSize: '0.78rem', color: '#e2e8f0', marginTop: '2px' }}>
-                    Free Tier includes the Dragon Ball Super 4K World. Upgrade to Pro ($2.99/mo) to unlock all 14+ 4K Anime, Gaming & Cinema Worlds!
+                    Free includes Dragon Ball Super + 1 Bonus Paid World. Upgrade for just{' '}
+                    <strong>{APP_CONFIG.PRO_PRICE_DISPLAY}</strong> (or{' '}
+                    <strong>{APP_CONFIG.PRO_ANNUAL_PRICE_DISPLAY}</strong>) to unlock all 14+ worlds!
                   </div>
                 </div>
                 <button
@@ -3803,6 +4564,24 @@ function App() {
                 </button>
               </div>
             )}
+
+            {/* Billing Cycle Switcher ($1.99/mo vs $14.99/yr Save 37%) */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+              <button
+                type="button"
+                className={`theme-chip ${proBillingCycle === 'monthly' ? 'selected' : ''}`}
+                onClick={() => setProBillingCycle('monthly')}
+              >
+                Monthly ($1.99/mo)
+              </button>
+              <button
+                type="button"
+                className={`theme-chip ${proBillingCycle === 'annual' ? 'selected' : ''}`}
+                onClick={() => setProBillingCycle('annual')}
+              >
+                Annual ($14.99/yr • Save 37%)
+              </button>
+            </div>
 
             <div className="pricing-grid">
               {/* Free Tier */}
@@ -3822,12 +4601,14 @@ function App() {
                     gap: '6px',
                   }}
                 >
-                  <li>Pomodoro Focus & Break Timer (Min/Sec)</li>
-                  <li>+1,000 Power Task Gamification</li>
                   <li>
-                    <strong>1 Free 4K World</strong>: Dragon Ball Super (Tournament of Power + Goku & Vegeta Orb)
+                    <strong>2 Free 4K Worlds Forever</strong>: Dragon Ball Super +{' '}
+                    <strong>1 Bonus Paid World</strong> of your choice
                   </li>
-                  <li>Voice Dictation & Hover Task Copy</li>
+                  <li>Drift-Free Pomodoro Timer (25/5, 50/10, 90/20 + Auto-Next)</li>
+                  <li>Hybrid Voice Dictation + Ambient Focus Soundscapes</li>
+                  <li>Daily Focus Streak & 7-Day Study Analytics</li>
+                  <li>Zero-Email Guest Mode Supported</li>
                 </ul>
                 <button
                   type="button"
@@ -3845,7 +4626,15 @@ function App() {
                   ⚡ LEGENDARY PRO TIER {isProMember ? '(UNLOCKED ✓)' : ''}
                 </div>
                 <div style={{ fontSize: '1.75rem', fontWeight: 900 }}>
-                  $2.99 <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ month</span>
+                  {proBillingCycle === 'annual' ? (
+                    <>
+                      $14.99 <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ year</span>
+                    </>
+                  ) : (
+                    <>
+                      $1.99 <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>/ month</span>
+                    </>
+                  )}
                 </div>
                 <ul
                   style={{
@@ -3859,34 +4648,87 @@ function App() {
                   }}
                 >
                   <li>
-                    <strong>All 14+ Pre-Built 4K Worlds & AI Prompt Bar</strong>: Instant 4K custom
-                    backgrounds, 3D character orbs & personas for <em>Solo Leveling, Demon Slayer,
-                    Jujutsu Kaisen, One Piece, F1 Racing, The Avengers, The Last of Us, Attack on
-                    Titan, The Walking Dead, Cyberpunk, Naruto, Black Clover, Elden Ring</em> & more!
+                    <strong>All 14+ 4K Worlds & AI Prompt Bar</strong>: Unlimited switching across{' '}
+                    <em>
+                      Solo Leveling, Demon Slayer, Jujutsu Kaisen, One Piece, F1, Avengers, The
+                      Last of Us, Attack on Titan, Walking Dead, Cyberpunk, Naruto, Black Clover,
+                      Dark Fantasy
+                    </em>{' '}
+                    & custom worlds!
                   </li>
-                  <li>Interactive Spotify & Apple Music Focus Dock</li>
+                  <li>Spotify & Apple Music Dock + Built-In Soundscapes</li>
                   <li>Microsoft OneNote & Calendar (.ics / Google) Sync</li>
-                  <li>PRO Golden Badge & Priority Feature Access</li>
+                  <li>PRO Golden Badge & Priority New Worlds</li>
                 </ul>
-                <button
-                  type="button"
-                  style={{ marginTop: 'auto' }}
-                  onClick={() => {
-                    if (stripeCheckoutUrl) {
-                      window.open(stripeCheckoutUrl, '_blank', 'noopener,noreferrer');
-                    } else {
-                      setShowProModal(false);
-                      setShowThemeModal(true);
-                    }
-                  }}
-                >
-                  {isProMember
-                    ? '✨ Open 4K World Selector (Pro Active)'
-                    : stripeCheckoutUrl
-                    ? '💳 Subscribe via Stripe ($2.99/mo) ↗'
-                    : '💳 Upgrade to Pro ($2.99/mo) — Unlock All 14+ Worlds'}
-                </button>
+
+                {isProMember ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: 'auto' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowProModal(false);
+                        setShowThemeModal(true);
+                      }}
+                    >
+                      ✨ Open All 14+ 4K Worlds (Pro Active)
+                    </button>
+                    {!isOwner && (
+                      <button
+                        type="button"
+                        className="outline"
+                        style={{ fontSize: '0.76rem', padding: '0.45rem' }}
+                        onClick={handleOpenBillingPortal}
+                      >
+                        Manage / Cancel Subscription
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={stripeCheckoutLoading}
+                    style={{ marginTop: 'auto' }}
+                    onClick={() => handleStripeCheckout(proBillingCycle)}
+                  >
+                    {stripeCheckoutLoading
+                      ? '⏳ Opening Secure Stripe Checkout...'
+                      : proBillingCycle === 'annual'
+                      ? '💳 Unlock Pro ($14.99/yr) via Stripe ↗'
+                      : '💳 Unlock Pro ($1.99/mo) via Stripe ↗'}
+                  </button>
+                )}
               </div>
+            </div>
+
+            {stripeStatusNotice && (
+              <div
+                style={{
+                  padding: '0.65rem 0.85rem',
+                  borderRadius: '10px',
+                  background: 'rgba(56, 189, 248, 0.14)',
+                  border: '1px solid rgba(56, 189, 248, 0.45)',
+                  color: '#bae6fd',
+                  fontSize: '0.78rem',
+                }}
+              >
+                ℹ️ {stripeStatusNotice}
+              </div>
+            )}
+
+            {/* Trust & Security Bar for Buyers */}
+            <div
+              style={{
+                textAlign: 'center',
+                fontSize: '0.74rem',
+                color: '#cbd5e1',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '10px',
+                background: 'rgba(34, 197, 94, 0.08)',
+                border: '1px solid rgba(74, 222, 128, 0.25)',
+              }}
+            >
+              🔒 <strong>Secured by Stripe</strong> • Supports Apple Pay, Google Pay & Cards • Cancel
+              anytime in 1 click • 7-Day No-Questions Refund Guarantee
             </div>
 
             {isOwner && (
@@ -3902,31 +4744,52 @@ function App() {
                 }}
               >
                 <span style={{ fontSize: '0.76rem', color: '#fef08a', fontWeight: 700 }}>
-                  👑 Owner Stripe Checkout Link Setup (Only visible to {APP_CONFIG.OWNER_EMAIL}):
+                  👑 Owner Stripe Setup ($1.99/mo & $14.99/yr — Only visible to {APP_CONFIG.OWNER_EMAIL}):
                 </span>
                 <span style={{ fontSize: '0.72rem', color: '#cbd5e1', lineHeight: 1.4 }}>
-                  Create a $2.99/mo Payment Link in your Stripe Dashboard (
-                  <code>dashboard.stripe.com/payment-links</code>), set the post-payment redirect URL
-                  to <code>https://xakhundx.github.io/Ai-Pomodoro-App/?pro=success</code>, and paste
-                  your <code>https://buy.stripe.com/...</code> link below:
+                  Either set <code>STRIPE_SECRET_KEY</code> + <code>STRIPE_PRICE_MONTHLY</code> +{' '}
+                  <code>STRIPE_PRICE_ANNUAL</code> in Vercel for live API Checkout, OR paste your
+                  Stripe Payment Links (<code>dashboard.stripe.com/payment-links</code>) below:
                 </span>
                 <input
                   type="url"
                   className="input-field"
-                  placeholder="Paste your Stripe Payment Link (https://buy.stripe.com/...) here"
+                  placeholder="Monthly $1.99/mo Stripe Link (https://buy.stripe.com/...)"
                   value={stripeCheckoutUrl}
                   onChange={e => {
                     setStripeCheckoutUrl(e.target.value);
                     localStorage.setItem('pomodoro-stripe-url', e.target.value);
                   }}
-                  style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem' }}
+                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.76rem' }}
+                />
+                <input
+                  type="url"
+                  className="input-field"
+                  placeholder="Annual $14.99/yr Stripe Link (https://buy.stripe.com/...)"
+                  value={stripeAnnualUrl}
+                  onChange={e => {
+                    setStripeAnnualUrl(e.target.value);
+                    localStorage.setItem('pomodoro-stripe-annual-url', e.target.value);
+                  }}
+                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.76rem' }}
+                />
+                <input
+                  type="url"
+                  className="input-field"
+                  placeholder="Optional Stripe Customer Portal Link (https://billing.stripe.com/p/login/...)"
+                  value={stripePortalUrl}
+                  onChange={e => {
+                    setStripePortalUrl(e.target.value);
+                    localStorage.setItem('pomodoro-stripe-portal-url', e.target.value);
+                  }}
+                  style={{ padding: '0.45rem 0.75rem', fontSize: '0.76rem' }}
                 />
               </div>
             )}
 
             <div
               style={{
-                padding: '0.85rem 1rem',
+                padding: '0.8rem 1rem',
                 borderRadius: '12px',
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(255,255,255,0.1)',
@@ -3935,28 +4798,32 @@ function App() {
                 alignItems: 'center',
                 flexWrap: 'wrap',
                 gap: '8px',
-                fontSize: '0.8rem',
+                fontSize: '0.78rem',
               }}
             >
               <span>
-                Created & Engineered by <strong>{APP_CONFIG.OWNER_NAME}</strong>
+                Created by <strong>{APP_CONFIG.OWNER_NAME}</strong>
               </span>
-              <div style={{ display: 'flex', gap: '12px' }}>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                <span
+                  style={{ color: '#cbd5e1', cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={() => setShowLegalModal('refund')}
+                >
+                  Refund Policy
+                </span>
+                <span
+                  style={{ color: '#cbd5e1', cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={() => setShowLegalModal('privacy')}
+                >
+                  Privacy
+                </span>
                 <a
                   href={APP_CONFIG.OWNER_LINKEDIN_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--accent)', fontWeight: 700, textDecoration: 'none' }}
                 >
-                  Connect on LinkedIn ↗
-                </a>
-                <a
-                  href={APP_CONFIG.OWNER_GITHUB_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: 'var(--accent)', fontWeight: 700, textDecoration: 'none' }}
-                >
-                  GitHub (@xakhundx) ↗
+                  LinkedIn ↗
                 </a>
               </div>
             </div>
@@ -4061,6 +4928,349 @@ function App() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 9: Account, Guest/Email Settings, Bonus World & Sign Out */}
+      {showAccountModal && (
+        <div className="modal-backdrop" onClick={() => setShowAccountModal(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>👤 Your Focus Arena Account</h2>
+                <div style={{ fontSize: '0.74rem', color: 'var(--accent)', marginTop: '2px' }}>
+                  {isOwner
+                    ? '👑 Owner Account'
+                    : isProMember
+                    ? '💎 Pro Member'
+                    : userProfile?.gmail
+                    ? '🆓 Free Account'
+                    : '⚡ Private Guest Mode (No Email Stored)'}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowAccountModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: '0.85rem 1rem',
+                borderRadius: '14px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                fontSize: '0.82rem',
+              }}
+            >
+              <div>
+                <strong>Nickname:</strong> {userProfile?.nickname || assistantName}
+              </div>
+              <div>
+                <strong>Email:</strong>{' '}
+                {userProfile?.gmail ? userProfile.gmail : <span style={{ color: '#94a3b8' }}>Not linked (Guest Mode)</span>}
+              </div>
+              <div>
+                <strong>Anonymous Session ID:</strong>{' '}
+                <code style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{visitorId}</code>
+              </div>
+              <div>
+                <strong>Free Unlocked Worlds:</strong> Dragon Ball Super
+                {claimedBonusThemeId && PRESET_THEMES[claimedBonusThemeId]
+                  ? ` + 🎁 ${PRESET_THEMES[claimedBonusThemeId].name}`
+                  : ' + 1 Unclaimed Bonus World!'}
+              </div>
+            </div>
+
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                const cleanNick = nicknameInput.trim() || userProfile?.nickname || 'FocusWarrior';
+                const cleanEmail = gmailInput.trim().toLowerCase();
+                if (cleanEmail && !cleanEmail.includes('@')) return;
+                const updated: UserProfile = {
+                  nickname: cleanNick,
+                  gmail: cleanEmail,
+                  visitorId,
+                  isGuest: !cleanEmail,
+                  claimedBonusThemeId,
+                  interestPrompt: userProfile?.interestPrompt || activeTheme.interestPrompt,
+                  joinedAt: userProfile?.joinedAt || new Date().toISOString(),
+                  lastActive: new Date().toISOString(),
+                };
+                setUserProfile(updated);
+                localStorage.setItem('pomodoro-user-profile', JSON.stringify(updated));
+                setAssistantName(cleanNick.toUpperCase());
+                setShowAccountModal(false);
+                setWelcomeThemeBanner(`✓ Profile saved as ${cleanNick}!`);
+                setTimeout(() => setWelcomeThemeBanner(null), 3500);
+              }}
+              style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+            >
+              <label style={{ fontSize: '0.78rem', fontWeight: 700, color: '#e2e8f0' }}>
+                Update Nickname or Link Optional Email:
+              </label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="Your Nickname"
+                value={nicknameInput}
+                onChange={e => setNicknameInput(e.target.value)}
+              />
+              <input
+                type="email"
+                className="input-field"
+                placeholder="Optional Email (leave blank for Guest Mode)"
+                value={gmailInput}
+                onChange={e => setGmailInput(e.target.value)}
+              />
+              <button type="submit">✓ Save Profile Changes</button>
+            </form>
+
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {!isProMember ? (
+                <button
+                  type="button"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setShowAccountModal(false);
+                    setShowProModal(true);
+                  }}
+                >
+                  💎 Upgrade to Pro ({APP_CONFIG.PRO_PRICE_DISPLAY})
+                </button>
+              ) : (
+                !isOwner && (
+                  <button
+                    type="button"
+                    className="outline"
+                    style={{ flex: 1 }}
+                    onClick={handleOpenBillingPortal}
+                  >
+                    💳 Manage Subscription
+                  </button>
+                )
+              )}
+              <button
+                type="button"
+                className="outline"
+                style={{
+                  flex: 1,
+                  borderColor: 'rgba(239, 68, 68, 0.55)',
+                  color: '#fca5a5',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                }}
+                onClick={handleSignOut}
+              >
+                🚪 Sign Out / Switch Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10: Focus Analytics, Daily Study Streak & 7-Day Activity Chart */}
+      {showStatsModal && (
+        <div className="modal-backdrop" onClick={() => setShowStatsModal(false)}>
+          <div className="modal-card" style={{ maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2>📊 Focus Analytics & Streak</h2>
+                <div style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: '2px' }}>
+                  Track your daily study momentum & consistency
+                </div>
+              </div>
+              <button
+                type="button"
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowStatsModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '10px',
+              }}
+            >
+              <div className="pricing-card" style={{ alignItems: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fb923c' }}>
+                  🔥 {focusMetrics.streak} {focusMetrics.streak === 1 ? 'Day' : 'Days'}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Study Streak</div>
+              </div>
+              <div className="pricing-card" style={{ alignItems: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#38bdf8' }}>
+                  ⏱️ {focusMetrics.todayMinutes}m
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Focused Today</div>
+              </div>
+              <div className="pricing-card" style={{ alignItems: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#4ade80' }}>
+                  ✅ {focusMetrics.totalTasksDone}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Tasks Crushed</div>
+              </div>
+              <div className="pricing-card" style={{ alignItems: 'center', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fde047' }}>
+                  ⚡ {focusMetrics.totalSessions}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Total Sessions</div>
+              </div>
+            </div>
+
+            {/* 7-Day Focus Minutes Bar Chart */}
+            <div
+              style={{
+                padding: '1rem',
+                borderRadius: '16px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '12px', color: '#e2e8f0' }}>
+                Last 7 Days Focus Time (Minutes)
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  height: '110px',
+                }}
+              >
+                {(() => {
+                  const maxMins = Math.max(25, ...focusMetrics.last7Days.map(d => d.minutes));
+                  return focusMetrics.last7Days.map(day => {
+                    const pct = Math.max(6, Math.round((day.minutes / maxMins) * 100));
+                    return (
+                      <div
+                        key={day.date}
+                        style={{
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '6px',
+                          height: '100%',
+                          justifyContent: 'flex-end',
+                        }}
+                      >
+                        <span style={{ fontSize: '0.66rem', color: '#cbd5e1', fontWeight: 700 }}>
+                          {day.minutes > 0 ? `${day.minutes}m` : ''}
+                        </span>
+                        <div
+                          style={{
+                            width: '100%',
+                            maxWidth: '34px',
+                            height: `${pct}%`,
+                            borderRadius: '8px 8px 4px 4px',
+                            background:
+                              day.minutes > 0
+                                ? 'linear-gradient(180deg, var(--accent), var(--primary))'
+                                : 'rgba(255,255,255,0.08)',
+                            boxShadow: day.minutes > 0 ? '0 0 12px var(--primary-glow)' : 'none',
+                            transition: 'height 0.4s ease',
+                          }}
+                        />
+                        <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                          {day.label}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 11: Privacy Policy, Terms of Service & Refund Policy (Stripe & Public Trust) */}
+      {showLegalModal && (
+        <div className="modal-backdrop" onClick={() => setShowLegalModal(null)}>
+          <div className="modal-card" style={{ maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2>
+                {showLegalModal === 'privacy'
+                  ? '🔒 Privacy Policy'
+                  : showLegalModal === 'terms'
+                  ? '📄 Terms of Service'
+                  : '💳 Refund & Cancellation Policy'}
+              </h2>
+              <button
+                type="button"
+                className="outline"
+                style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem' }}
+                onClick={() => setShowLegalModal(null)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ fontSize: '0.84rem', color: '#cbd5e1', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {showLegalModal === 'privacy' && (
+                <>
+                  <p style={{ margin: 0 }}>
+                    <strong>No Email Required:</strong> You can use Focus Arena completely in Guest
+                    Mode. Tasks, Power Level, study streaks, and preferences are stored locally in
+                    your browser.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    <strong>Voice Dictation:</strong> Microphone audio is processed locally in your
+                    browser (Web Speech / local Web Worker) and is never stored on our servers.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    <strong>Payments:</strong> All Pro subscriptions are processed securely by{' '}
+                    <strong>Stripe</strong>. Focus Arena never sees or stores your credit card
+                    number.
+                  </p>
+                </>
+              )}
+              {showLegalModal === 'terms' && (
+                <>
+                  <p style={{ margin: 0 }}>
+                    Focus Arena is a personal study and productivity workspace provided on an
+                    as-available basis. Free accounts receive Dragon Ball Super plus 1 permanent
+                    bonus theme of their choice.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    Pro subscriptions ({APP_CONFIG.PRO_PRICE_DISPLAY} or{' '}
+                    {APP_CONFIG.PRO_ANNUAL_PRICE_DISPLAY}) unlock all themes and productivity docks
+                    and renew automatically until cancelled.
+                  </p>
+                </>
+              )}
+              {showLegalModal === 'refund' && (
+                <>
+                  <p style={{ margin: 0 }}>
+                    <strong>Cancel Anytime in 1 Click:</strong> Cancel your Pro subscription at any
+                    time via the Stripe Billing Portal in your Account menu — no lock-in and no
+                    cancellation fees.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    <strong>7-Day Happiness Guarantee:</strong> Not satisfied within 7 days of
+                    subscribing? Email <strong>{APP_CONFIG.OWNER_EMAIL}</strong> with your Stripe
+                    receipt for a full, no-questions-asked refund.
+                  </p>
+                </>
+              )}
+            </div>
+            <button type="button" onClick={() => setShowLegalModal(null)}>
+              Got It
+            </button>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import React, { Suspense, useRef, useState, useEffect, useMemo, Component, Error
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Sphere, MeshDistortMaterial } from '@react-three/drei';
 import * as THREE from 'three';
-import gokuImage from '../assets/goku_vegeta.png';
+import gokuImage from '../assets/goku_vegeta.webp';
 import { AppTheme, PRESET_THEMES } from '../themes/themeEngine';
 
 // Mobile-Safe Error Boundary so WebGL context failure never crashes the React UI
