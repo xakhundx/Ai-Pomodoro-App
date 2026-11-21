@@ -544,64 +544,192 @@ function App() {
 
   // Enhanced High-Accuracy Voice Dictation (Web Speech API)
   const [isListening, setIsListening] = useState(false);
+  const [voiceStatusText, setVoiceStatusText] = useState<string>('');
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const recognitionRef = useRef<any>(null);
-  const finalizedTextRef = useRef<string>('');
+  const shouldListenRef = useRef<boolean>(false);
+  const committedTextRef = useRef<string>('');
+  const sessionTranscriptRef = useRef<string>('');
+  const taskInputRef = useRef<HTMLInputElement | null>(null);
+  const networkRetryCountRef = useRef<number>(0);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cleanupRecognitionInstance = (method: 'stop' | 'abort' = 'abort') => {
+    if (recognitionRef.current) {
+      const old = recognitionRef.current;
+      old.onstart = null;
+      old.onresult = null;
+      old.onerror = null;
+      old.onend = null;
+      try {
+        old[method]();
+      } catch {
+        // Ignore if recognition has already stopped
+      }
+      recognitionRef.current = null;
+    }
+  };
+
+  const stopListening = () => {
+    shouldListenRef.current = false;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+    setIsListening(false);
+    setVoiceStatusText('');
+    cleanupRecognitionInstance('stop');
+  };
+
+  const startRecognitionInstance = () => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      stopListening();
+      setVoiceError(
+        'Your browser does not support Voice Dictation. Please use Chrome, Edge, or Safari, or press Win+H / Fn+D for OS voice typing.'
+      );
+      return;
+    }
+
+    cleanupRecognitionInstance('abort');
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = navigator.language || 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    let pendingRetryDelay = 60;
+
+    recognition.onstart = () => {
+      if (!shouldListenRef.current) {
+        cleanupRecognitionInstance('abort');
+        return;
+      }
+      setIsListening(true);
+      setVoiceError(null);
+      setVoiceStatusText('🎙️ Listening... Speak your task now');
+    };
+
+    recognition.onresult = (event: any) => {
+      if (!shouldListenRef.current) return;
+      networkRetryCountRef.current = 0;
+
+      let transcript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        const item = event.results[i];
+        if (item && item[0] && typeof item[0].transcript === 'string') {
+          transcript += `${item[0].transcript} `;
+        }
+      }
+
+      const cleanSession = transcript.replace(/\s+/g, ' ').trim();
+      sessionTranscriptRef.current = cleanSession;
+      const combined = `${committedTextRef.current}${cleanSession}`.replace(/\s+/g, ' ').trim();
+      const formatted = combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
+      setNewTaskText(formatted);
+      if (cleanSession) {
+        setVoiceStatusText(`🎙️ Heard: "${cleanSession}"`);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      const errCode = event?.error;
+      console.warn('Speech recognition notice:', errCode);
+
+      if (errCode === 'aborted' && !shouldListenRef.current) {
+        return;
+      }
+
+      if (errCode === 'no-speech' && shouldListenRef.current) {
+        setVoiceStatusText('🎙️ Still listening... Speak your task now');
+        return;
+      }
+
+      if (errCode === 'network' && networkRetryCountRef.current < 1 && shouldListenRef.current) {
+        networkRetryCountRef.current += 1;
+        pendingRetryDelay = 250;
+        setVoiceStatusText('🎙️ Reconnecting speech service...');
+        return;
+      }
+
+      stopListening();
+      if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
+        setVoiceError(
+          'Microphone permission denied. Please allow microphone access in your browser address bar.'
+        );
+      } else if (errCode === 'audio-capture') {
+        setVoiceError(
+          'No working microphone detected. Please check your microphone connection and input settings.'
+        );
+      } else if (errCode === 'network') {
+        setVoiceError(
+          'Browser speech service unreachable. Please use Chrome/Edge/Safari, or press Win+H (Windows) / Fn+D (Mac) for OS voice typing.'
+        );
+      } else {
+        setVoiceError(
+          `Voice dictation stopped (${errCode || 'unknown error'}). Please try again or type your task.`
+        );
+      }
+    };
+
+    recognition.onend = () => {
+      if (sessionTranscriptRef.current) {
+        committedTextRef.current = `${committedTextRef.current}${sessionTranscriptRef.current} `.replace(
+          /\s+/g,
+          ' '
+        );
+        sessionTranscriptRef.current = '';
+      }
+
+      if (shouldListenRef.current) {
+        restartTimerRef.current = setTimeout(() => {
+          if (shouldListenRef.current) {
+            startRecognitionInstance();
+          }
+        }, pendingRetryDelay);
+      } else {
+        setIsListening(false);
+        setVoiceStatusText('');
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch (err) {
+      console.warn('Speech recognition failed to start:', err);
+      stopListening();
+      setVoiceError('Could not start microphone dictation. Please check permissions or try again.');
+    }
+  };
 
   const toggleListening = () => {
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      setIsListening(false);
+    if (isListening || shouldListenRef.current) {
+      stopListening();
+      taskInputRef.current?.focus();
       return;
     }
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Your browser does not support Speech Recognition. Please use Google Chrome or Microsoft Edge.');
+      setVoiceError(
+        'Your browser does not support Web Speech dictation. Please use Chrome, Edge, or Safari, or press Win+H (Windows) / Fn+D (Mac).'
+      );
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognitionRef.current = recognition;
-    recognition.lang = navigator.language || 'en-US';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    finalizedTextRef.current = newTaskText.trim() ? `${newTaskText.trim()} ` : '';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const transcriptChunk = result[0].transcript;
-        if (result.isFinal) {
-          finalizedTextRef.current += `${transcriptChunk.trim()} `;
-        } else {
-          interimTranscript += transcriptChunk;
-        }
-      }
-      const combined = `${finalizedTextRef.current}${interimTranscript}`.replace(/\s+/g, ' ').trimStart();
-      const formatted = combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
-      setNewTaskText(formatted);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.warn('Speech recognition notice:', event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognition.start();
+    setVoiceError(null);
+    networkRetryCountRef.current = 0;
+    committedTextRef.current = newTaskText.trim() ? `${newTaskText.trim()} ` : '';
+    sessionTranscriptRef.current = '';
+    shouldListenRef.current = true;
+    setIsListening(true);
+    setVoiceStatusText('🎙️ Starting microphone...');
+    taskInputRef.current?.focus();
+    startRecognitionInstance();
   };
 
   // Timer State (with explicit Minutes & Seconds support!)
@@ -770,13 +898,13 @@ function App() {
   // Task Handlers
   const addTask = () => {
     if (!newTaskText.trim()) return;
-    if (isListening && recognitionRef.current) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+    if (isListening || shouldListenRef.current) {
+      stopListening();
     }
     setTasks([...tasks, { id: Date.now().toString(), text: newTaskText.trim(), completed: false }]);
     setNewTaskText('');
-    finalizedTextRef.current = '';
+    committedTextRef.current = '';
+    sessionTranscriptRef.current = '';
   };
 
   const toggleTask = (id: string, text: string, completed: boolean) => {
@@ -2147,7 +2275,9 @@ function App() {
             {/* Live Voice Dictation Banner */}
             {isListening && (
               <div className="voice-status-banner">
-                <span>🎙️ Listening clearly... Speak your task now</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {voiceStatusText || '🎙️ Listening... Speak your task now'}
+                </span>
                 <button
                   type="button"
                   className="task-action-btn"
@@ -2159,9 +2289,40 @@ function App() {
               </div>
             )}
 
+            {/* Voice Dictation Error Banner */}
+            {voiceError && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: '10px',
+                  background: 'rgba(239, 68, 68, 0.16)',
+                  border: '1px solid rgba(239, 68, 68, 0.55)',
+                  color: '#fca5a5',
+                  fontSize: '0.76rem',
+                  lineHeight: 1.35,
+                }}
+              >
+                <span style={{ flex: 1 }}>⚠️ {voiceError}</span>
+                <button
+                  type="button"
+                  className="task-action-btn"
+                  onClick={() => setVoiceError(null)}
+                  style={{ borderColor: '#ef4444', color: '#fecaca' }}
+                  title="Dismiss voice error"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Add Task Input Bar */}
             <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
               <button
+                type="button"
                 className="outline"
                 style={{
                   padding: '0.75rem',
@@ -2174,15 +2335,23 @@ function App() {
                 {isListening ? '🛑' : '🎤'}
               </button>
               <input
+                ref={taskInputRef}
                 type="text"
                 className="input-field"
                 placeholder="Add a new task (+1,000 Power)..."
                 style={{ flex: 1, padding: '0.75rem' }}
                 value={newTaskText}
-                onChange={e => setNewTaskText(e.target.value)}
+                onChange={e => {
+                  const nextVal = e.target.value;
+                  setNewTaskText(nextVal);
+                  if (isListening || shouldListenRef.current) {
+                    committedTextRef.current = nextVal.trim() ? `${nextVal.trim()} ` : '';
+                    sessionTranscriptRef.current = '';
+                  }
+                }}
                 onKeyDown={e => e.key === 'Enter' && addTask()}
               />
-              <button style={{ padding: '0.75rem 1.25rem' }} onClick={addTask}>
+              <button type="button" style={{ padding: '0.75rem 1.25rem' }} onClick={addTask}>
                 +
               </button>
             </div>
