@@ -542,17 +542,187 @@ function App() {
     return () => clearTimeout(timer);
   }, [currentToast]);
 
-  // Enhanced High-Accuracy Voice Dictation (Web Speech API)
+  // Enhanced High-Accuracy Hybrid Voice Dictation (Web Speech API + Local Whisper AI Fallback + Live Mic Meter)
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribingFallback, setIsTranscribingFallback] = useState(false);
+  const [micLevel, setMicLevel] = useState<number>(0);
+  const [audioInputDevices, setAudioInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState<string>(
+    () => localStorage.getItem('pomodoro-mic-device-id') || ''
+  );
   const [voiceStatusText, setVoiceStatusText] = useState<string>('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
+
   const recognitionRef = useRef<any>(null);
   const shouldListenRef = useRef<boolean>(false);
   const committedTextRef = useRef<string>('');
   const sessionTranscriptRef = useRef<string>('');
   const taskInputRef = useRef<HTMLInputElement | null>(null);
-  const networkRetryCountRef = useRef<number>(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Parallel Audio Capture & Local Whisper Fallback Refs (solves Microsoft Edge / Brave / Windows speech silence)
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioCtxRef = useRef<AudioContext | null>(null);
+  const micProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const pcmChunksRef = useRef<Float32Array[]>([]);
+  const preRollChunksRef = useRef<Float32Array[]>([]);
+  const hasActiveUtteranceRef = useRef<boolean>(false);
+  const speechFrameCountRef = useRef<number>(0);
+  const lastVoiceTimeRef = useRef<number>(0);
+  const webSpeechGotResultRef = useRef<boolean>(false);
+  const whisperPipelineRef = useRef<any>(null);
+  const whisperLoadingPromiseRef = useRef<Promise<any> | null>(null);
+
+  const getWhisperTranscriber = async () => {
+    if (whisperPipelineRef.current) return whisperPipelineRef.current;
+    if (whisperLoadingPromiseRef.current) return whisperLoadingPromiseRef.current;
+
+    whisperLoadingPromiseRef.current = (async () => {
+      try {
+        const transformersUrl = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        const mod: any = await import(/* @vite-ignore */ transformersUrl);
+        if (mod.env) {
+          mod.env.allowLocalModels = false;
+          mod.env.useBrowserCache = true;
+        }
+        const pipe = await mod.pipeline(
+          'automatic-speech-recognition',
+          'Xenova/whisper-tiny.en',
+          { quantized: true }
+        );
+        whisperPipelineRef.current = pipe;
+        return pipe;
+      } catch (err) {
+        console.warn('Local Whisper fallback model failed to load:', err);
+        whisperLoadingPromiseRef.current = null;
+        return null;
+      }
+    })();
+
+    return whisperLoadingPromiseRef.current;
+  };
+
+  const resampleTo16kHz = (samples: Float32Array, inputRate: number): Float32Array => {
+    if (!inputRate || inputRate === 16000) return samples;
+    const ratio = inputRate / 16000;
+    const outLength = Math.round(samples.length / ratio);
+    const result = new Float32Array(outLength);
+    for (let i = 0; i < outLength; i++) {
+      const pos = i * ratio;
+      const idx = Math.floor(pos);
+      const frac = pos - idx;
+      const s0 = samples[idx] || 0;
+      const s1 = samples[Math.min(idx + 1, samples.length - 1)] || 0;
+      result[i] = s0 + frac * (s1 - s0);
+    }
+    return result;
+  };
+
+  const transcribeBufferedAudioWithWhisper = async (
+    chunks: Float32Array[],
+    sampleRate: number
+  ) => {
+    if (!chunks.length) return;
+    const totalLen = chunks.reduce((acc, c) => acc + c.length, 0);
+    if (totalLen < sampleRate * 0.22) return;
+
+    const merged = new Float32Array(totalLen);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    const resampled = resampleTo16kHz(merged, sampleRate);
+
+    // Peak-normalize audio so quiet Windows microphones still transcribe accurately
+    let maxAbs = 0;
+    for (let i = 0; i < resampled.length; i++) {
+      const a = Math.abs(resampled[i]);
+      if (a > maxAbs) maxAbs = a;
+    }
+    if (maxAbs < 0.004) return;
+    if (maxAbs < 0.75) {
+      const gain = 0.85 / maxAbs;
+      for (let i = 0; i < resampled.length; i++) {
+        resampled[i] *= gain;
+      }
+    }
+
+    setIsTranscribingFallback(true);
+    setVoiceStatusText(
+      whisperPipelineRef.current
+        ? '🧠 Transcribing your voice...'
+        : '🧠 Initializing AI voice engine (1st time takes ~3s)...'
+    );
+
+    try {
+      const transcriber = await getWhisperTranscriber();
+      if (!transcriber) {
+        setIsTranscribingFallback(false);
+        return;
+      }
+
+      const output = await transcriber(resampled, {
+        language: 'english',
+        task: 'transcribe',
+      });
+
+      const rawText = (typeof output?.text === 'string' ? output.text : '')
+        .replace(/\[.*?\]|\(.*?\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (
+        rawText &&
+        !/^(you|thank you\.?|thanks for watching\.?|\.)$/i.test(rawText)
+      ) {
+        committedTextRef.current = `${committedTextRef.current}${rawText} `.replace(/\s+/g, ' ');
+        const combined = committedTextRef.current.trim();
+        const formatted =
+          combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
+        setNewTaskText(formatted);
+        setVoiceStatusText(`🎙️ Heard: "${rawText}"`);
+      } else if (shouldListenRef.current) {
+        setVoiceStatusText('🎙️ Listening... Speak your task clearly');
+      }
+    } catch (err) {
+      console.warn('Whisper transcription error:', err);
+    } finally {
+      setIsTranscribingFallback(false);
+    }
+  };
+
+  const cleanupAudioCapture = () => {
+    if (micProcessorRef.current) {
+      micProcessorRef.current.onaudioprocess = null;
+      try {
+        micProcessorRef.current.disconnect();
+      } catch {
+        // Ignore disconnect error
+      }
+      micProcessorRef.current = null;
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(t => {
+        try {
+          t.stop();
+        } catch {
+          // Ignore track stop error
+        }
+      });
+      micStreamRef.current = null;
+    }
+    if (micAudioCtxRef.current) {
+      try {
+        micAudioCtxRef.current.close().catch(() => {});
+      } catch {
+        // Ignore close error
+      }
+      micAudioCtxRef.current = null;
+    }
+    setMicLevel(0);
+  };
 
   const cleanupRecognitionInstance = (method: 'stop' | 'abort' = 'abort') => {
     if (recognitionRef.current) {
@@ -570,25 +740,182 @@ function App() {
     }
   };
 
-  const stopListening = () => {
+  const stopListening = (flushPendingAudio = true) => {
     shouldListenRef.current = false;
     if (restartTimerRef.current) {
       clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
     }
+
+    if (
+      flushPendingAudio &&
+      !webSpeechGotResultRef.current &&
+      pcmChunksRef.current.length > 0 &&
+      speechFrameCountRef.current >= 2
+    ) {
+      const pending = [...pcmChunksRef.current];
+      const sr = micAudioCtxRef.current?.sampleRate || 16000;
+      pcmChunksRef.current = [];
+      preRollChunksRef.current = [];
+      hasActiveUtteranceRef.current = false;
+      speechFrameCountRef.current = 0;
+      void transcribeBufferedAudioWithWhisper(pending, sr);
+    } else {
+      pcmChunksRef.current = [];
+      preRollChunksRef.current = [];
+      hasActiveUtteranceRef.current = false;
+      speechFrameCountRef.current = 0;
+    }
+
     setIsListening(false);
     setVoiceStatusText('');
     cleanupRecognitionInstance('stop');
+    cleanupAudioCapture();
+  };
+
+  const startAudioCapture = async (overrideMicId?: string) => {
+    cleanupAudioCapture();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+
+    const targetId = overrideMicId !== undefined ? overrideMicId : selectedMicId;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: targetId
+          ? {
+              deviceId: { exact: targetId },
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          : {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+      });
+    } catch {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        console.warn('Microphone getUserMedia failed:', err);
+        stopListening(false);
+        setVoiceError(
+          'Microphone permission denied or no mic available. Please allow microphone access in your browser address bar.'
+        );
+        return;
+      }
+    }
+
+    if (!shouldListenRef.current) {
+      stream.getTracks().forEach(t => t.stop());
+      return;
+    }
+
+    micStreamRef.current = stream;
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === 'audioinput');
+      setAudioInputDevices(mics);
+      const activeTrackDeviceId = stream.getAudioTracks()[0]?.getSettings?.()?.deviceId;
+      if (activeTrackDeviceId && !targetId) {
+        setSelectedMicId(activeTrackDeviceId);
+      }
+    } catch {
+      // Ignore device enumeration errors
+    }
+
+    try {
+      const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtxClass) return;
+      let audioCtx: AudioContext;
+      try {
+        audioCtx = new AudioCtxClass({ sampleRate: 16000 });
+      } catch {
+        audioCtx = new AudioCtxClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume().catch(() => {});
+      }
+      micAudioCtxRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      const silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
+      micProcessorRef.current = processor;
+
+      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+        if (!shouldListenRef.current) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const frame = new Float32Array(input.length);
+        frame.set(input);
+
+        let sumSq = 0;
+        for (let i = 0; i < frame.length; i++) {
+          sumSq += frame[i] * frame[i];
+        }
+        const rms = Math.sqrt(sumSq / frame.length);
+        const level = Math.min(
+          100,
+          Math.round(Math.pow(Math.max(0, rms - 0.0015) / 0.1, 0.55) * 100)
+        );
+        setMicLevel(level);
+
+        const isSpeechFrame = rms > 0.009;
+        if (isSpeechFrame) {
+          if (!hasActiveUtteranceRef.current) {
+            hasActiveUtteranceRef.current = true;
+            speechFrameCountRef.current = 0;
+            for (const pre of preRollChunksRef.current) {
+              pcmChunksRef.current.push(pre);
+            }
+            preRollChunksRef.current = [];
+          }
+          speechFrameCountRef.current += 1;
+          lastVoiceTimeRef.current = Date.now();
+          pcmChunksRef.current.push(frame);
+
+          if (!webSpeechGotResultRef.current && speechFrameCountRef.current === 2) {
+            setVoiceStatusText('🎙️ Voice detected... Keep speaking (or click Done)');
+          }
+        } else if (hasActiveUtteranceRef.current) {
+          pcmChunksRef.current.push(frame);
+          const silenceMs = Date.now() - lastVoiceTimeRef.current;
+          if (silenceMs > 900) {
+            const chunksToProcess = [...pcmChunksRef.current];
+            const speechFrames = speechFrameCountRef.current;
+            pcmChunksRef.current = [];
+            hasActiveUtteranceRef.current = false;
+            speechFrameCountRef.current = 0;
+
+            if (!webSpeechGotResultRef.current && speechFrames >= 2) {
+              void transcribeBufferedAudioWithWhisper(chunksToProcess, audioCtx.sampleRate);
+            }
+            webSpeechGotResultRef.current = false;
+          }
+        } else {
+          preRollChunksRef.current.push(frame);
+          if (preRollChunksRef.current.length > 3) {
+            preRollChunksRef.current.shift();
+          }
+        }
+      };
+    } catch (err) {
+      console.warn('Audio processor setup failed:', err);
+    }
   };
 
   const startRecognitionInstance = () => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      stopListening();
-      setVoiceError(
-        'Your browser does not support Voice Dictation. Please use Chrome, Edge, or Safari, or press Win+H / Fn+D for OS voice typing.'
-      );
+      // Browser lacks Web Speech API (e.g. Firefox); local Whisper engine handles transcription
       return;
     }
 
@@ -596,12 +923,10 @@ function App() {
 
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
-    recognition.lang = navigator.language || 'en-US';
-    recognition.continuous = false;
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
-
-    let pendingRetryDelay = 60;
 
     recognition.onstart = () => {
       if (!shouldListenRef.current) {
@@ -610,12 +935,10 @@ function App() {
       }
       setIsListening(true);
       setVoiceError(null);
-      setVoiceStatusText('🎙️ Listening... Speak your task now');
     };
 
     recognition.onresult = (event: any) => {
       if (!shouldListenRef.current) return;
-      networkRetryCountRef.current = 0;
 
       let transcript = '';
       for (let i = 0; i < event.results.length; i++) {
@@ -626,52 +949,33 @@ function App() {
       }
 
       const cleanSession = transcript.replace(/\s+/g, ' ').trim();
+      if (!cleanSession) return;
+
+      // Mark that native Web Speech succeeded so fallback Whisper doesn't duplicate it
+      webSpeechGotResultRef.current = true;
+      pcmChunksRef.current = [];
+      hasActiveUtteranceRef.current = false;
+      speechFrameCountRef.current = 0;
+
       sessionTranscriptRef.current = cleanSession;
       const combined = `${committedTextRef.current}${cleanSession}`.replace(/\s+/g, ' ').trim();
-      const formatted = combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
+      const formatted =
+        combined.length > 0 ? combined.charAt(0).toUpperCase() + combined.slice(1) : '';
       setNewTaskText(formatted);
-      if (cleanSession) {
-        setVoiceStatusText(`🎙️ Heard: "${cleanSession}"`);
-      }
+      setVoiceStatusText(`🎙️ Heard: "${cleanSession}"`);
     };
 
     recognition.onerror = (event: any) => {
       const errCode = event?.error;
-      console.warn('Speech recognition notice:', errCode);
-
-      if (errCode === 'aborted' && !shouldListenRef.current) {
-        return;
-      }
-
-      if (errCode === 'no-speech' && shouldListenRef.current) {
-        setVoiceStatusText('🎙️ Still listening... Speak your task now');
-        return;
-      }
-
-      if (errCode === 'network' && networkRetryCountRef.current < 1 && shouldListenRef.current) {
-        networkRetryCountRef.current += 1;
-        pendingRetryDelay = 250;
-        setVoiceStatusText('🎙️ Reconnecting speech service...');
-        return;
-      }
-
-      stopListening();
+      console.warn('Web Speech notice (fallback active):', errCode);
       if (errCode === 'not-allowed' || errCode === 'service-not-allowed') {
-        setVoiceError(
-          'Microphone permission denied. Please allow microphone access in your browser address bar.'
-        );
-      } else if (errCode === 'audio-capture') {
-        setVoiceError(
-          'No working microphone detected. Please check your microphone connection and input settings.'
-        );
-      } else if (errCode === 'network') {
-        setVoiceError(
-          'Browser speech service unreachable. Please use Chrome/Edge/Safari, or press Win+H (Windows) / Fn+D (Mac) for OS voice typing.'
-        );
-      } else {
-        setVoiceError(
-          `Voice dictation stopped (${errCode || 'unknown error'}). Please try again or type your task.`
-        );
+        // Only stop if getUserMedia also didn't open
+        if (!micStreamRef.current) {
+          stopListening(false);
+          setVoiceError(
+            'Microphone permission denied. Please allow microphone access in your browser address bar.'
+          );
+        }
       }
     };
 
@@ -683,52 +987,47 @@ function App() {
         );
         sessionTranscriptRef.current = '';
       }
-
-      if (shouldListenRef.current) {
-        restartTimerRef.current = setTimeout(() => {
-          if (shouldListenRef.current) {
-            startRecognitionInstance();
-          }
-        }, pendingRetryDelay);
-      } else {
-        setIsListening(false);
-        setVoiceStatusText('');
-      }
     };
 
     try {
       recognition.start();
-    } catch (err) {
-      console.warn('Speech recognition failed to start:', err);
-      stopListening();
-      setVoiceError('Could not start microphone dictation. Please check permissions or try again.');
+    } catch {
+      // Local Whisper fallback via startAudioCapture remains active
+    }
+  };
+
+  const handleMicDeviceChange = (newDeviceId: string) => {
+    setSelectedMicId(newDeviceId);
+    localStorage.setItem('pomodoro-mic-device-id', newDeviceId);
+    if (shouldListenRef.current) {
+      setVoiceStatusText('🎙️ Switched microphone — speak your task now');
+      void startAudioCapture(newDeviceId);
     }
   };
 
   const toggleListening = () => {
     if (isListening || shouldListenRef.current) {
-      stopListening();
+      stopListening(true);
       taskInputRef.current?.focus();
       return;
     }
 
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setVoiceError(
-        'Your browser does not support Web Speech dictation. Please use Chrome, Edge, or Safari, or press Win+H (Windows) / Fn+D (Mac).'
-      );
-      return;
-    }
-
     setVoiceError(null);
-    networkRetryCountRef.current = 0;
     committedTextRef.current = newTaskText.trim() ? `${newTaskText.trim()} ` : '';
     sessionTranscriptRef.current = '';
+    pcmChunksRef.current = [];
+    preRollChunksRef.current = [];
+    hasActiveUtteranceRef.current = false;
+    speechFrameCountRef.current = 0;
+    webSpeechGotResultRef.current = false;
     shouldListenRef.current = true;
     setIsListening(true);
-    setVoiceStatusText('🎙️ Starting microphone...');
+    setVoiceStatusText('🎙️ Listening... Speak your task now');
     taskInputRef.current?.focus();
+
+    // Pre-warm local Whisper AI fallback in background for Microsoft Edge / Brave / Firefox
+    void getWhisperTranscriber();
+    void startAudioCapture();
     startRecognitionInstance();
   };
 
@@ -899,7 +1198,7 @@ function App() {
   const addTask = () => {
     if (!newTaskText.trim()) return;
     if (isListening || shouldListenRef.current) {
-      stopListening();
+      stopListening(false);
     }
     setTasks([...tasks, { id: Date.now().toString(), text: newTaskText.trim(), completed: false }]);
     setNewTaskText('');
@@ -2272,20 +2571,105 @@ function App() {
               })}
             </ul>
 
-            {/* Live Voice Dictation Banner */}
-            {isListening && (
-              <div className="voice-status-banner">
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {voiceStatusText || '🎙️ Listening... Speak your task now'}
-                </span>
-                <button
-                  type="button"
-                  className="task-action-btn"
-                  onClick={toggleListening}
-                  style={{ borderColor: '#ef4444', color: '#fecaca' }}
-                >
-                  Done
-                </button>
+            {/* Live Voice Dictation Banner (with Real-Time Mic Volume Meter & Device Picker) */}
+            {(isListening || isTranscribingFallback) && (
+              <div
+                className="voice-status-banner"
+                style={{ flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {isTranscribingFallback
+                      ? voiceStatusText || '🧠 Transcribing your voice...'
+                      : voiceStatusText || '🎙️ Listening... Speak your task now'}
+                  </span>
+                  {isListening && (
+                    <button
+                      type="button"
+                      className="task-action-btn"
+                      onClick={toggleListening}
+                      style={{ borderColor: '#ef4444', color: '#fecaca' }}
+                    >
+                      Done
+                    </button>
+                  )}
+                </div>
+
+                {/* Live Microphone Volume Meter Bar */}
+                {isListening && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '0.68rem',
+                      color: '#cbd5e1',
+                    }}
+                  >
+                    <span style={{ whiteSpace: 'nowrap', opacity: 0.9 }}>
+                      {micLevel > 8 ? '🔊 Mic Active' : '🔈 Speak up'}
+                    </span>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: '6px',
+                        borderRadius: '999px',
+                        background: 'rgba(255, 255, 255, 0.12)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${Math.max(4, micLevel)}%`,
+                          height: '100%',
+                          borderRadius: '999px',
+                          background:
+                            micLevel > 15
+                              ? 'linear-gradient(90deg, #22c55e, #4ade80)'
+                              : 'rgba(248, 113, 113, 0.7)',
+                          transition: 'width 0.08s ease-out',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Microphone Input Device Selector (when multiple mics exist on PC) */}
+                {isListening && audioInputDevices.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.68rem' }}>
+                    <span style={{ color: '#cbd5e1', whiteSpace: 'nowrap' }}>🎤 Mic:</span>
+                    <select
+                      value={selectedMicId}
+                      onChange={e => handleMicDeviceChange(e.target.value)}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        background: 'rgba(15, 23, 42, 0.85)',
+                        color: '#f8fafc',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        borderRadius: '6px',
+                        padding: '2px 6px',
+                        fontSize: '0.68rem',
+                        outline: 'none',
+                      }}
+                    >
+                      {audioInputDevices.map((dev, idx) => (
+                        <option key={dev.deviceId || idx} value={dev.deviceId}>
+                          {dev.label || `Microphone ${idx + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 
